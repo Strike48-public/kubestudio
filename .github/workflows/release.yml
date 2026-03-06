@@ -197,6 +197,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: k*
 
       - name: Prepare assets
         run: |
