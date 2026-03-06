@@ -1,0 +1,13 @@
+[package]
+name = "ks-plugin"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# Platform-specific config directory
+dirs.workspace = true

@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "maestro": {
+      "args": [],
+      "command": "/Users/taylor.wood/Library/Application Support/Claude Maestro/MaestroMCPServer",
+      "env": {
+        "MAESTRO_PORT_RANGE_END": "3099",
+        "MAESTRO_PORT_RANGE_START": "3000",
+        "MAESTRO_PROJECT_HASH": "6d0b2e348b4c",
+        "MAESTRO_SESSION_ID": "6"
+      },
+      "type": "stdio"
+    },
+    "maestro-status": {
+      "args": [],
+      "command": "/Users/taylor.wood/code/maestro/target/debug/maestro-mcp-server",
+      "env": {
+        "MAESTRO_INSTANCE_ID": "84fac01e-7847-418f-abc2-3e2d032d7b2a",
+        "MAESTRO_SESSION_ID": "10",
+        "MAESTRO_STATUS_URL": "http://127.0.0.1:9900/status"
+      },
+      "type": "stdio"
+    }
+  }
+}

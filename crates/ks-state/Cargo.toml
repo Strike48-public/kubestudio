@@ -1,0 +1,9 @@
+[package]
+name = "ks-state"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ks-core = { path = "../ks-core" }
+tokio = { workspace = true, features = ["sync"] }
+serde.workspace = true

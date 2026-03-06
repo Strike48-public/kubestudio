@@ -1,0 +1,170 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubestudio.fullname" . }}
+  labels:
+    {{- include "kubestudio.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubestudio.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubestudio.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kubestudio.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: kubestudio
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [{{ include "kubestudio.binary" . | quote }}]
+          env:
+            - name: PORT
+              value: {{ .Values.kubestudio.port | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.kubestudio.logLevel | quote }}
+            - name: KUBESTUDIO_PERMISSION_MODE
+              value: {{ .Values.kubestudio.permissionMode | quote }}
+            - name: CLUSTER_NAME
+              value: {{ .Values.kubestudio.clusterName | default .Release.Name | quote }}
+            {{- if or .Values.kubeconfigs .Values.existingKubeConfigSecret }}
+            - name: KUBECONFIG
+              value: {{ include "kubestudio.kubeconfigPaths" . | quote }}
+            {{- end }}
+            {{- if eq .Values.mode "ai-enabled" }}
+            - name: HOME
+              value: /data/connector
+            - name: KUBESTUDIO_AI
+              value: "true"
+            {{- with .Values.connector.strikeApiUrl }}
+            - name: STRIKE48_API_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.connector.strikeUrl }}
+            - name: STRIKE48_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.connector.host }}
+            - name: HOST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.connector.tenantId }}
+            - name: TENANT_ID
+              value: {{ . | quote }}
+            {{- end }}
+            - name: INSTANCE_ID
+              value: {{ .Values.connector.instanceId | quote }}
+            {{- if .Values.connector.tlsInsecure }}
+            - name: MATRIX_TLS_INSECURE
+              value: "true"
+            {{- end }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.kubestudio.port }}
+              protocol: TCP
+          {{- if eq .Values.mode "ai-enabled" }}
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          startupProbe:
+            exec:
+              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            failureThreshold: 30
+            periodSeconds: 2
+          {{- else }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          {{- end }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if or .Values.kubeconfigs .Values.existingKubeConfigSecret }}
+            - name: kubeconfigs
+              mountPath: /etc/kubestudio/kubeconfigs
+              readOnly: true
+            {{- end }}
+            {{- if eq .Values.mode "ai-enabled" }}
+            - name: connector-data
+              mountPath: /data/connector
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- if or .Values.kubeconfigs .Values.existingKubeConfigSecret }}
+        - name: kubeconfigs
+          secret:
+            {{- if .Values.existingKubeConfigSecret }}
+            secretName: {{ .Values.existingKubeConfigSecret }}
+            {{- else }}
+            secretName: {{ include "kubestudio.fullname" . }}-kubeconfig
+            {{- end }}
+        {{- end }}
+        {{- if eq .Values.mode "ai-enabled" }}
+        - name: connector-data
+          persistentVolumeClaim:
+            claimName: {{ include "kubestudio.fullname" . }}-connector-data
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

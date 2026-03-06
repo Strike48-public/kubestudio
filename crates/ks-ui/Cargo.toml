@@ -1,0 +1,84 @@
+[package]
+name = "ks-ui"
+version.workspace = true
+edition.workspace = true
+default-run = "kubestudio"
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:rfd"]
+fullstack = ["dioxus/fullstack", "dioxus/server"]
+liveview = ["dep:dioxus-liveview"]
+server = ["liveview", "dep:axum"]
+connector = ["liveview", "dep:strike48-connector", "dep:strike48-proto", "dep:reqwest", "dep:tokio-tungstenite", "dep:dashmap", "dep:anyhow", "dep:axum", "dep:regex", "dep:base64", "dep:rsa", "dep:rand", "dep:jsonwebtoken", "dep:uuid", "dep:urlencoding", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower-service"]
+
+[lib]
+name = "ks_ui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kubestudio"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "ks-server"
+path = "src/bin/ks-server.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "ks-connector"
+path = "src/bin/ks-connector.rs"
+required-features = ["connector"]
+
+[[bin]]
+name = "ks-tool-connector"
+path = "src/bin/ks-tool-connector.rs"
+required-features = ["connector"]
+
+[dependencies]
+ks-core = { path = "../ks-core" }
+ks-kube = { path = "../ks-kube" }
+ks-plugin = { path = "../ks-plugin" }
+ks-state = { path = "../ks-state" }
+dioxus.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+serde_yaml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono = "0.4"
+tokio-util.workspace = true
+
+# Desktop-only dependencies
+arboard = { workspace = true, optional = true }
+rfd = { workspace = true, optional = true }
+
+# Liveview dependency (direct to avoid dioxus/liveview feature bug)
+dioxus-liveview = { workspace = true, optional = true }
+
+# Connector dependencies
+strike48-connector = { workspace = true, optional = true }
+strike48-proto = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+regex = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+rsa = { version = "0.9", optional = true, features = ["std"] }
+rand = { version = "0.8", optional = true }
+jsonwebtoken = { version = "9", optional = true }
+uuid = { version = "1", optional = true, features = ["v4"] }
+urlencoding = { version = "2", optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
+pulldown-cmark = "0.13.0"
+lucide-dioxus = { version = "2.40.0", features = ["all-icons"] }

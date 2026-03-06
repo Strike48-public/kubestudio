@@ -1,0 +1,17 @@
+{{- if eq .Values.mode "ai-enabled" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubestudio.fullname" . }}-connector-data
+  labels:
+    {{- include "kubestudio.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.connector.persistence.size }}
+  {{- with .Values.connector.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

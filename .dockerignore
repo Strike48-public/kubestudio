@@ -1,0 +1,12 @@
+target/
+.git/
+docs/
+tests/
+fixtures/
+agent_docs/
+.github/
+*.md
+!crates/**/*.md
+LICENSE
+.mcp.json
+CLAUDE.md

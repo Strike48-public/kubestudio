@@ -1,0 +1,71 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+repository = "https://github.com/strike48/kubestudio"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+async-trait = "0.1"
+bytes = "1.9"
+
+# Kubernetes
+kube = { version = "0.98", features = ["runtime", "client", "derive", "ws"] }
+k8s-openapi = { version = "0.24", features = ["latest"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# UI (features added at crate level for desktop/fullstack modes)
+dioxus = "0.6"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Clipboard (desktop only)
+arboard = "3.4"
+
+# File dialogs (desktop only)
+rfd = "0.15"
+
+# Platform-specific directories
+dirs = "5"
+
+# HTTP client (for connector proxy)
+reqwest = { version = "0.12", features = ["json"] }
+
+# WebSocket (for connector proxy)
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+
+# Concurrent map (for WS connection tracking)
+dashmap = "6"
+
+# Connector SDK
+strike48-connector = "0.2.7"
+strike48-proto = "0.2.7"
+
+# Web server (for connector mode)
+axum = "0.7"
+
+# HTTP primitives (for Unix socket serving + client)
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tower-service = "0.3"
+
+# Dioxus liveview (direct dependency to avoid dioxus/liveview feature bug)
+dioxus-liveview = { version = "0.6", features = ["axum"] }

@@ -1,0 +1,100 @@
+# -- Deployment mode: "standalone" (web UI only) or "ai-enabled" (web UI + Matrix connector)
+mode: standalone
+
+image:
+  repository: ghcr.io/strike48/kubestudio
+  tag: ""  # defaults to appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+kubestudio:
+  # -- Permission mode: "read" (view-only) or "write" (allow edits)
+  permissionMode: read
+  # -- Cluster display name (used when no kubeconfig is mounted).
+  # Defaults to the Helm release name if empty.
+  clusterName: ""
+  # -- Server listen port inside the container
+  port: 8080
+  # -- Log level (trace, debug, info, warn, error)
+  logLevel: info
+
+# -- Kubeconfig files to mount. Cluster/context names come directly from
+# the kubeconfig, so they appear exactly as they do in your local setup.
+# Each key becomes a file under /etc/kubestudio/kubeconfigs/.
+# Install with: helm install kubestudio chart/kubestudio --set-file kubeconfigs.default=~/.kube/config
+#
+# If omitted, falls back to the in-cluster service account (single-cluster, auto-detected name).
+kubeconfigs: {}
+
+# -- Use an existing Secret containing kubeconfig file(s) instead of inline values
+existingKubeConfigSecret: ""
+
+# -- Connector settings (only used when mode=ai-enabled)
+connector:
+  # -- Strike48 API URL (HTTPS)
+  strikeApiUrl: ""
+  # -- Strike48 gRPC URL (e.g. grpc://connectors-studio.strike48.test:80)
+  strikeUrl: ""
+  host: ""
+  tenantId: ""
+  instanceId: "kubestudio"
+  # -- Skip TLS verification for Matrix connections
+  tlsInsecure: false
+  # -- Persistent storage for connector credentials (keys + OTT tokens)
+  persistence:
+    size: 64Mi
+    storageClass: ""
+
+rbac:
+  # -- Create ClusterRoleBinding for the service account
+  create: true
+  # -- ClusterRole to bind: view, edit, admin, or cluster-admin
+  clusterRole: view
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #   - host: kubestudio.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  tls: []
+  #   - secretName: kubestudio-tls
+  #     hosts:
+  #       - kubestudio.example.com
+
+resources: {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 256Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# -- Optional PodDisruptionBudget
+pdb:
+  enabled: false
+  minAvailable: 1
