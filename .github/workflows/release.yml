@@ -100,9 +100,51 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/*
 
+  build-connector:
+    name: Connector ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: ks-connector-linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: ks-connector-darwin-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: ks-connector-darwin-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: connector-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --bin ks-connector --features connector --no-default-features -p ks-ui
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/ks-connector dist/
+          cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz ks-connector
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+
   release:
     name: Release
-    needs: [build, docker]
+    needs: [build, build-connector, docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +178,11 @@ jobs:
             - **Linux**: `kubestudio-linux-x86_64`
 
             After downloading, make executable: `chmod +x kubestudio-*`
+
+            ### Connector Binary (ks-connector)
+            - **macOS (Apple Silicon)**: `ks-connector-darwin-aarch64.tar.gz`
+            - **macOS (Intel)**: `ks-connector-darwin-x86_64.tar.gz`
+            - **Linux**: `ks-connector-linux-x86_64.tar.gz`
 
             ### Docker
             ```bash
