@@ -65,6 +65,10 @@ jobs:
             target: aarch64-apple-darwin
             artifact: kubestudio-darwin-aarch64
             name: macOS aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: kubestudio-windows-x86_64.exe
+            name: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +82,10 @@ jobs:
       - name: Install protobuf (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -94,7 +102,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/kubestudio dist/${{ matrix.artifact }}
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/kubestudio.exe dist/${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/kubestudio dist/${{ matrix.artifact }}
+          fi
           cd dist
           if command -v sha256sum &> /dev/null; then
             sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
@@ -125,6 +137,10 @@ jobs:
             target: aarch64-apple-darwin
             artifact: ks-connector-darwin-aarch64
             name: macOS aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: ks-connector-windows-x86_64
+            name: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +154,10 @@ jobs:
       - name: Install protobuf (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -154,13 +174,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/ks-connector dist/
-          cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz ks-connector
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/ks-connector.exe dist/
+            cd dist && 7z a ${{ matrix.artifact }}.zip ks-connector.exe
+          else
+            cp target/${{ matrix.target }}/release/ks-connector dist/
+            cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz ks-connector
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}.tar.gz
+          path: dist/${{ matrix.artifact }}.*
 
   release:
     name: Release
@@ -196,13 +221,15 @@ jobs:
             - **macOS (Apple Silicon)**: `kubestudio-darwin-aarch64`
             - **macOS (Intel)**: `kubestudio-darwin-x86_64`
             - **Linux**: `kubestudio-linux-x86_64`
+            - **Windows**: `kubestudio-windows-x86_64.exe`
 
-            After downloading, make executable: `chmod +x kubestudio-*`
+            After downloading on macOS/Linux, make executable: `chmod +x kubestudio-*`
 
             ### Connector Binary (ks-connector)
             - **macOS (Apple Silicon)**: `ks-connector-darwin-aarch64.tar.gz`
             - **macOS (Intel)**: `ks-connector-darwin-x86_64.tar.gz`
             - **Linux**: `ks-connector-linux-x86_64.tar.gz`
+            - **Windows**: `ks-connector-windows-x86_64.zip`
 
             ### Docker
             ```bash
