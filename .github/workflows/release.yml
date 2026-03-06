@@ -12,7 +12,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: strike48/kubestudio
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   docker:
@@ -48,7 +48,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build:
-    name: Build ${{ matrix.target }}
+    name: Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -56,12 +56,15 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: kubestudio-linux-x86_64
+            name: Linux x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: kubestudio-darwin-x86_64
+            name: macOS x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: kubestudio-darwin-aarch64
+            name: macOS aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +73,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev protobuf-compiler
+
+      - name: Install protobuf (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -101,7 +108,7 @@ jobs:
           path: dist/*
 
   build-connector:
-    name: Connector ${{ matrix.target }}
+    name: Connector (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -109,15 +116,28 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: ks-connector-linux-x86_64
+            name: Linux x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: ks-connector-darwin-x86_64
+            name: macOS x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: ks-connector-darwin-aarch64
+            name: macOS aarch64
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protobuf (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -169,7 +189,7 @@ jobs:
 
             ### Quick Install (macOS/Linux)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/Strike48/kubestudio/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
             ### Manual Download
@@ -186,7 +206,7 @@ jobs:
 
             ### Docker
             ```bash
-            docker pull ghcr.io/strike48/kubestudio:${{ github.ref_name }}
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}
             ```
 
             ### Helm
