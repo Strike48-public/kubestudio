@@ -211,34 +211,43 @@ jobs:
           files: release/*
           generate_release_notes: true
           body: |
-            ## Installation
+            ## KubeStudio ${{ github.ref_name }}
 
-            ### Quick Install (macOS/Linux)
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
-            ```
+            ### Downloads
 
-            ### Manual Download
-            - **macOS (Apple Silicon)**: `kubestudio-darwin-aarch64`
-            - **macOS (Intel)**: `kubestudio-darwin-x86_64`
-            - **Linux**: `kubestudio-linux-x86_64`
-            - **Windows**: `kubestudio-windows-x86_64.exe`
+            #### Desktop (kubestudio)
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | macOS | Apple Silicon | `kubestudio-darwin-aarch64` |
+            | macOS | Intel | `kubestudio-darwin-x86_64` |
+            | Linux | x86_64 | `kubestudio-linux-x86_64` |
+            | Windows | x86_64 | `kubestudio-windows-x86_64.exe` |
 
             After downloading on macOS/Linux, make executable: `chmod +x kubestudio-*`
 
-            ### Connector Binary (ks-connector)
-            - **macOS (Apple Silicon)**: `ks-connector-darwin-aarch64.tar.gz`
-            - **macOS (Intel)**: `ks-connector-darwin-x86_64.tar.gz`
-            - **Linux**: `ks-connector-linux-x86_64.tar.gz`
-            - **Windows**: `ks-connector-windows-x86_64.zip`
+            #### Connector (ks-connector)
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | macOS | Apple Silicon | `ks-connector-darwin-aarch64.tar.gz` |
+            | macOS | Intel | `ks-connector-darwin-x86_64.tar.gz` |
+            | Linux | x86_64 | `ks-connector-linux-x86_64.tar.gz` |
+            | Windows | x86_64 | `ks-connector-windows-x86_64.zip` |
 
             ### Docker
+
             ```bash
             docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}
             ```
 
             ### Helm
+
             ```bash
             helm install kubestudio chart/kubestudio \
               --set image.tag=${{ github.ref_name }}
             ```
+
+            ### Checksums
+
+            See individual `.sha256` files for checksums.
