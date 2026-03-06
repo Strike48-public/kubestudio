@@ -12,7 +12,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: strike48/kubestudio
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   docker:
@@ -48,7 +48,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build:
-    name: Build ${{ matrix.target }}
+    name: Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -56,12 +56,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: kubestudio-linux-x86_64
+            name: Linux x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: kubestudio-darwin-x86_64
+            name: macOS x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: kubestudio-darwin-aarch64
+            name: macOS aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: kubestudio-windows-x86_64.exe
+            name: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +77,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev protobuf-compiler
+
+      - name: Install protobuf (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -87,7 +102,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/kubestudio dist/${{ matrix.artifact }}
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/kubestudio.exe dist/${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/kubestudio dist/${{ matrix.artifact }}
+          fi
           cd dist
           if command -v sha256sum &> /dev/null; then
             sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
@@ -101,7 +120,7 @@ jobs:
           path: dist/*
 
   build-connector:
-    name: Connector ${{ matrix.target }}
+    name: Connector (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -109,15 +128,36 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: ks-connector-linux-x86_64
+            name: Linux x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: ks-connector-darwin-x86_64
+            name: macOS x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: ks-connector-darwin-aarch64
+            name: macOS aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: ks-connector-windows-x86_64
+            name: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protobuf (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -134,13 +174,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/ks-connector dist/
-          cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz ks-connector
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/ks-connector.exe dist/
+            cd dist && 7z a ${{ matrix.artifact }}.zip ks-connector.exe
+          else
+            cp target/${{ matrix.target }}/release/ks-connector dist/
+            cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz ks-connector
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}.tar.gz
+          path: dist/${{ matrix.artifact }}.*
 
   release:
     name: Release
@@ -169,24 +214,26 @@ jobs:
 
             ### Quick Install (macOS/Linux)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/Strike48/kubestudio/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
             ### Manual Download
             - **macOS (Apple Silicon)**: `kubestudio-darwin-aarch64`
             - **macOS (Intel)**: `kubestudio-darwin-x86_64`
             - **Linux**: `kubestudio-linux-x86_64`
+            - **Windows**: `kubestudio-windows-x86_64.exe`
 
-            After downloading, make executable: `chmod +x kubestudio-*`
+            After downloading on macOS/Linux, make executable: `chmod +x kubestudio-*`
 
             ### Connector Binary (ks-connector)
             - **macOS (Apple Silicon)**: `ks-connector-darwin-aarch64.tar.gz`
             - **macOS (Intel)**: `ks-connector-darwin-x86_64.tar.gz`
             - **Linux**: `ks-connector-linux-x86_64.tar.gz`
+            - **Windows**: `ks-connector-windows-x86_64.zip`
 
             ### Docker
             ```bash
-            docker pull ghcr.io/strike48/kubestudio:${{ github.ref_name }}
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}
             ```
 
             ### Helm
