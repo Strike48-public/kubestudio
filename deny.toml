@@ -2,11 +2,22 @@
 version = 2
 ignore = [
     "RUSTSEC-2024-0370", # proc-macro-error is unmaintained, transitive dep
+    "RUSTSEC-2023-0071", # rsa timing sidechannel, no fix available
+    # GTK3 bindings unmaintained (transitive from dioxus-desktop/wry)
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0412", # gdk
+    "RUSTSEC-2024-0413", # atk
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0415", # gtk
+    "RUSTSEC-2024-0416", # atk-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    "RUSTSEC-2024-0418", # gdk-sys
+    "RUSTSEC-2024-0419", # gtk3-macros
+    "RUSTSEC-2024-0420", # gtk-sys
 ]
 
 [licenses]
 version = 2
-private = { ignore = true }
 allow = [
     "MIT",
     "Apache-2.0",
@@ -21,6 +32,17 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
 ]
+
+# strike48 crates don't publish license metadata
+[[licenses.clarify]]
+name = "strike48-connector"
+expression = "MIT"
+license-files = []
+
+[[licenses.clarify]]
+name = "strike48-proto"
+expression = "MIT"
+license-files = []
 
 [bans]
 multiple-versions = "warn"
