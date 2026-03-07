@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use ks_kube::{
     AgentInfo, ChatClient, ChatMessage, ConversationInfo, CreateAgentInput, MatrixChatClient,
-    MessagePart, ToolCallInfo,
+    MessagePart, ToolCallInfo, UpdateAgentInput,
 };
 use lucide_dioxus::{ArrowDown, ChevronDown, ChevronRight, X};
 use pulldown_cmark::{Options, Parser, html};
@@ -33,7 +33,7 @@ fn default_kubestudio_agent_input(tenant_id: &str) -> CreateAgentInput {
     connectors.insert(
         connector_key,
         serde_json::json!({
-            "consent_mode": "manual",
+            "consent_mode": "auto",
             "enabled": true,
             "tool_configs": {
                 "list_clusters": { "consent_mode": "auto", "enabled": true },
@@ -213,10 +213,26 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                             .cloned();
 
                         if let Some(ks_agent) = auto {
-                            tracing::info!("ChatPanel: auto-selected agent: {}", ks_agent.name);
-                            agents.set(list);
-                            agents_loaded.set(true);
-                            selected_agent.set(Some(ks_agent));
+                            tracing::info!("ChatPanel: auto-selected agent: {}, updating tool configs", ks_agent.name);
+                            let fresh_input = default_kubestudio_agent_input(&tenant_id);
+                            let update_input = UpdateAgentInput {
+                                id: ks_agent.id.clone(),
+                                tools: fresh_input.tools,
+                            };
+                            match client.update_agent(update_input).await {
+                                Ok(updated) => {
+                                    tracing::info!("ChatPanel: updated agent tools for {}", updated.name);
+                                    agents.set(list);
+                                    agents_loaded.set(true);
+                                    selected_agent.set(Some(updated));
+                                }
+                                Err(e) => {
+                                    tracing::warn!("ChatPanel: failed to update agent tools: {}, using existing", e);
+                                    agents.set(list);
+                                    agents_loaded.set(true);
+                                    selected_agent.set(Some(ks_agent));
+                                }
+                            }
                         } else {
                             tracing::info!("ChatPanel: no kubestudio agent found, creating one");
                             match client

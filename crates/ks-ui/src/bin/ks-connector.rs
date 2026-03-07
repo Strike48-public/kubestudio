@@ -1846,13 +1846,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if is_strikehub_mode {
-        // StrikeHub mode: serve liveview only on the IPC socket.
-        // StrikeHub manages Matrix registration, content proxying, and WS bridging.
+        // StrikeHub mode: serve liveview on the IPC socket.
+        // Still register with Matrix so the connector appears in connectorApps.
         tracing::info!(
-            "StrikeHub mode: serving liveview only (StrikeHub manages Matrix registration)"
+            "StrikeHub mode: serving liveview on IPC socket, will also register with Matrix"
         );
-        let _ = dioxus_handle.await;
-        return Ok(());
     }
 
     let ipc = dioxus_ipc();

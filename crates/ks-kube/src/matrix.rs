@@ -111,6 +111,24 @@ impl CreateAgentInput {
     }
 }
 
+/// Input for updating an existing agent's configuration via the Matrix API.
+#[derive(Debug, Clone)]
+pub struct UpdateAgentInput {
+    pub id: String,
+    pub tools: Option<serde_json::Value>,
+}
+
+impl UpdateAgentInput {
+    fn to_gql_variables(&self) -> serde_json::Value {
+        let mut input = serde_json::Map::new();
+        input.insert("id".into(), serde_json::json!(self.id));
+        if let Some(ref t) = self.tools {
+            input.insert("tools".into(), serde_json::json!(t.to_string()));
+        }
+        serde_json::json!({ "input": input })
+    }
+}
+
 /// Abstraction over the chat backend. Implement this trait to swap Matrix
 /// for another provider without touching the UI layer.
 #[async_trait]
@@ -118,6 +136,7 @@ pub trait ChatClient: Send + Sync {
     async fn list_agents(&self) -> anyhow::Result<Vec<AgentInfo>>;
     async fn find_agent_by_name(&self, name: &str) -> anyhow::Result<Option<AgentInfo>>;
     async fn create_agent(&self, input: CreateAgentInput) -> anyhow::Result<AgentInfo>;
+    async fn update_agent(&self, input: UpdateAgentInput) -> anyhow::Result<AgentInfo>;
     async fn create_conversation(&self, title: Option<&str>) -> anyhow::Result<String>;
     async fn send_message(
         &self,
@@ -260,6 +279,14 @@ struct CreatedAgentNode {
     name: String,
     description: Option<String>,
     agent_greeting: Option<String>,
+}
+
+// -- UpdateAgent --
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAgentData {
+    update_agent: CreatedAgentNode,
 }
 
 // -- Conversation --
@@ -499,6 +526,58 @@ impl ChatClient for MatrixChatClient {
             .data
             .map(|d| d.create_agent)
             .ok_or_else(|| anyhow::anyhow!("No agent in create response"))?;
+
+        Ok(AgentInfo {
+            id: node.id,
+            name: node.name,
+            description: node.description,
+            greeting: node.agent_greeting,
+        })
+    }
+
+    async fn update_agent(&self, input: UpdateAgentInput) -> anyhow::Result<AgentInfo> {
+        if self.auth_token.is_none() {
+            anyhow::bail!("Auth token required");
+        }
+
+        let query = r#"
+            mutation UpdateAgent($input: UpdateAgentInput!) {
+                updateAgent(input: $input) {
+                    id
+                    name
+                    description
+                    agentGreeting
+                }
+            }
+        "#;
+
+        tracing::info!("Updating agent tools: id={}", input.id);
+
+        let variables = input.to_gql_variables();
+
+        let resp = self
+            .authed_post()
+            .json(&serde_json::json!({
+                "query": query,
+                "variables": variables,
+                "operationName": "UpdateAgent",
+            }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("UpdateAgent failed: {} - {}", status, body);
+        }
+
+        let gql: GqlResponse<UpdateAgentData> = resp.json().await?;
+        check_errors(gql.errors)?;
+
+        let node = gql
+            .data
+            .map(|d| d.update_agent)
+            .ok_or_else(|| anyhow::anyhow!("No agent in update response"))?;
 
         Ok(AgentInfo {
             id: node.id,
