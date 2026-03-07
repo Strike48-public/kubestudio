@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running pre-commit checks..."
+
+# 1. Gitleaks - check for secrets
+if command -v gitleaks &> /dev/null; then
+    echo "  Checking for secrets (gitleaks)..."
+    gitleaks protect --staged --no-banner
+else
+    echo "  WARNING: gitleaks not installed, skipping secret scan. Install with: brew install gitleaks"
+fi
+
+# 2. Cargo fmt - check formatting
+echo "  Checking formatting (cargo fmt)..."
+cargo fmt --all -- --check
+
+# 3. Cargo check - ensure it compiles
+echo "  Checking compilation (cargo check)..."
+cargo check --workspace 2>&1
+
+# 4. Cargo audit - check for known vulnerabilities
+if command -v cargo-audit &> /dev/null; then
+    echo "  Checking dependencies (cargo audit)..."
+    cargo audit --quiet
+else
+    echo "  WARNING: cargo-audit not installed, skipping. Install with: cargo install cargo-audit"
+fi
+
+echo "All pre-commit checks passed!"
