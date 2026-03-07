@@ -1827,11 +1827,13 @@ async fn main() -> anyhow::Result<()> {
     }
     #[cfg(not(unix))]
     {
-        if std::env::var("STRIKEHUB_SOCKET").is_ok() {
-            tracing::warn!("STRIKEHUB_SOCKET is not supported on Windows, ignoring");
+        if let Ok(pipe_name) = std::env::var("STRIKEHUB_SOCKET") {
+            ipc_addr = ks_ui::ipc::IpcAddr::from_string(&pipe_name);
+            is_strikehub_mode = true;
+        } else {
+            ipc_addr = ks_ui::ipc::IpcAddr::for_connector(std::process::id());
+            is_strikehub_mode = false;
         }
-        ipc_addr = ks_ui::ipc::IpcAddr::for_connector(std::process::id());
-        is_strikehub_mode = false;
     }
 
     // Start Dioxus liveview server in background

@@ -40,6 +40,19 @@ impl IpcAddr {
         Self { inner: path }
     }
 
+    /// Create from an explicit string (cross-platform).
+    /// On Unix this is a socket path; on Windows a named pipe path.
+    pub fn from_string(s: &str) -> Self {
+        #[cfg(unix)]
+        return Self {
+            inner: std::path::PathBuf::from(s),
+        };
+        #[cfg(windows)]
+        return Self {
+            inner: s.to_string(),
+        };
+    }
+
     /// Remove the socket file (Unix) or no-op (Windows named pipes auto-cleanup).
     pub fn cleanup(&self) {
         #[cfg(unix)]
