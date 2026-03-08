@@ -12,6 +12,6 @@ pub use client::{
 };
 pub use matrix::{
     AgentInfo, ChatClient, ChatMessage, ConversationInfo, ConversationState, CreateAgentInput,
-    MatrixChatClient, MessagePart, ToolCallInfo,
+    MatrixChatClient, MessagePart, ToolCallInfo, UpdateAgentInput,
 };
 pub use toolbox::{ExecResult, PermissionMode, Toolbox, ToolboxStatus, cleanup_orphaned_toolbox};

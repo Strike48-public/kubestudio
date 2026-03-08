@@ -1827,11 +1827,13 @@ async fn main() -> anyhow::Result<()> {
     }
     #[cfg(not(unix))]
     {
-        if std::env::var("STRIKEHUB_SOCKET").is_ok() {
-            tracing::warn!("STRIKEHUB_SOCKET is not supported on Windows, ignoring");
+        if let Ok(sock_val) = std::env::var("STRIKEHUB_SOCKET") {
+            ipc_addr = ks_ui::ipc::IpcAddr::from_string(sock_val);
+            is_strikehub_mode = true;
+        } else {
+            ipc_addr = ks_ui::ipc::IpcAddr::for_connector(std::process::id());
+            is_strikehub_mode = false;
         }
-        ipc_addr = ks_ui::ipc::IpcAddr::for_connector(std::process::id());
-        is_strikehub_mode = false;
     }
 
     // Start Dioxus liveview server in background
@@ -1846,13 +1848,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if is_strikehub_mode {
-        // StrikeHub mode: serve liveview only on the IPC socket.
-        // StrikeHub manages Matrix registration, content proxying, and WS bridging.
+        // StrikeHub mode: serve liveview on the IPC socket.
+        // Still register with Matrix so the connector appears in connectorApps.
         tracing::info!(
-            "StrikeHub mode: serving liveview only (StrikeHub manages Matrix registration)"
+            "StrikeHub mode: serving liveview on IPC socket, will also register with Matrix"
         );
-        let _ = dioxus_handle.await;
-        return Ok(());
     }
 
     let ipc = dioxus_ipc();
