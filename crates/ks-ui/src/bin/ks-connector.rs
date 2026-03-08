@@ -1587,7 +1587,9 @@ async fn register_with_ott(
     creds: &CredentialsIssued,
     config: &ConnectorConfig,
 ) -> anyhow::Result<(OttCredentials, RsaPrivateKey)> {
-    let api_base = std::env::var("STRIKE48_API_URL").unwrap_or_default();
+    // Prefer MATRIX_API_URL env var, fall back to server-provided URL.
+    // Do NOT use STRIKE48_API_URL — it may point at a local proxy that doesn't handle OTT routes.
+    let api_base = std::env::var("MATRIX_API_URL").unwrap_or_default();
     let base_url = if api_base.is_empty() {
         &creds.matrix_api_url
     } else {
@@ -1657,7 +1659,17 @@ async fn register_with_ott(
             continue;
         }
 
-        anyhow::bail!("Registration failed: {} - {}", status, body);
+        anyhow::bail!(
+            "Registration failed: {} {} - URL: {} - Body: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("Unknown"),
+            register_url,
+            if body.is_empty() {
+                "(empty response)"
+            } else {
+                &body
+            }
+        );
     }
 
     anyhow::bail!(
@@ -1782,7 +1794,11 @@ async fn run_message_loop(
                         connector.handle_ws_close(req);
                     }
                     Some(Message::CredentialsIssued(creds)) => {
-                        tracing::info!("Received CredentialsIssued - attempting OTT registration");
+                        tracing::info!(
+                            "Received CredentialsIssued - attempting OTT registration (api_url={}, register_url={})",
+                            creds.matrix_api_url,
+                            creds.register_url
+                        );
 
                         match register_with_ott(&creds, config).await {
                             Ok((credentials, private_key)) => {
@@ -1793,7 +1809,13 @@ async fn run_message_loop(
                                 });
                             }
                             Err(e) => {
-                                tracing::error!("OTT registration failed: {}", e);
+                                tracing::error!(
+                                    "OTT registration failed: {} (matrix_api_url={}, register_url={}, STRIKE48_API_URL={:?})",
+                                    e,
+                                    creds.matrix_api_url,
+                                    creds.register_url,
+                                    std::env::var("STRIKE48_API_URL").ok()
+                                );
                             }
                         }
                     }
