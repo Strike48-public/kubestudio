@@ -1876,13 +1876,9 @@ async fn main() -> anyhow::Result<()> {
 
     if is_strikehub_mode && std::env::var("STRIKE48_URL").is_err() {
         // StrikeHub mode without gateway URL: serve liveview only.
-        tracing::info!(
-            "StrikeHub mode: serving liveview only (no Matrix URL configured)"
-        );
+        tracing::info!("StrikeHub mode: serving liveview only (no Matrix URL configured)");
     } else if is_strikehub_mode {
-        tracing::info!(
-            "StrikeHub mode: will register with gateway and serve liveview"
-        );
+        tracing::info!("StrikeHub mode: will register with gateway and serve liveview");
     }
 
     let ipc = dioxus_ipc();
