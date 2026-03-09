@@ -1587,9 +1587,14 @@ async fn register_with_ott(
     creds: &CredentialsIssued,
     config: &ConnectorConfig,
 ) -> anyhow::Result<(OttCredentials, RsaPrivateKey)> {
-    // Prefer MATRIX_API_URL env var, fall back to server-provided URL.
-    // Do NOT use STRIKE48_API_URL — it may point at a local proxy that doesn't handle OTT routes.
-    let api_base = std::env::var("MATRIX_API_URL").unwrap_or_default();
+    // In StrikeHub mode, always use the server-provided URL for OTT registration
+    // because STRIKE48_API_URL points to StrikeHub's local auth proxy which
+    // doesn't have the /api/connectors/register-with-ott endpoint.
+    let api_base = if std::env::var("STRIKEHUB_SOCKET").is_ok() {
+        String::new()
+    } else {
+        std::env::var("STRIKE48_API_URL").unwrap_or_default()
+    };
     let base_url = if api_base.is_empty() {
         &creds.matrix_api_url
     } else {
@@ -1869,12 +1874,11 @@ async fn main() -> anyhow::Result<()> {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
-    if is_strikehub_mode {
-        // StrikeHub mode: serve liveview on the IPC socket.
-        // Still register with Matrix so the connector appears in connectorApps.
-        tracing::info!(
-            "StrikeHub mode: serving liveview on IPC socket, will also register with Matrix"
-        );
+    if is_strikehub_mode && std::env::var("STRIKE48_URL").is_err() {
+        // StrikeHub mode without gateway URL: serve liveview only.
+        tracing::info!("StrikeHub mode: serving liveview only (no Matrix URL configured)");
+    } else if is_strikehub_mode {
+        tracing::info!("StrikeHub mode: will register with gateway and serve liveview");
     }
 
     let ipc = dioxus_ipc();
