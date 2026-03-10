@@ -370,7 +370,7 @@ pub fn App() -> Element {
             "cronjobs" => cronjobs_to_items(&cronjobs.read().items),
             "configmaps" => configmaps_to_items(&configmaps.read().items),
             "secrets" => secrets_to_items(&secrets.read().items, &pods.read().items),
-            "services" => services_to_items(&services.read().items),
+            "services" => services_to_items(&services.read().items, &endpoints.read().items),
             "endpoints" => endpoints_to_items(&endpoints.read().items),
             "persistentvolumes" => persistentvolumes_to_items(&persistentvolumes.read().items),
             "persistentvolumeclaims" => {
@@ -1566,7 +1566,7 @@ pub fn App() -> Element {
     let cronjob_items = cronjobs_to_items(&cronjobs.read().items);
     let configmap_items = configmaps_to_items(&configmaps.read().items);
     let secret_items = secrets_to_items(&secrets.read().items, &pods.read().items);
-    let service_items = services_to_items(&services.read().items);
+    let service_items = services_to_items(&services.read().items, &endpoints.read().items);
     let endpoint_items = endpoints_to_items(&endpoints.read().items);
     let persistentvolume_items = persistentvolumes_to_items(&persistentvolumes.read().items);
     let persistentvolumeclaim_items =

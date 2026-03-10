@@ -410,7 +410,27 @@ pub fn secrets_to_items(secrets: &[Secret], pods: &[Pod]) -> Vec<ResourceItem> {
         .collect()
 }
 
-pub fn services_to_items(services: &[Service]) -> Vec<ResourceItem> {
+pub fn services_to_items(services: &[Service], endpoints: &[Endpoints]) -> Vec<ResourceItem> {
+    // Build a lookup of endpoint address counts by name+namespace
+    let endpoint_counts: std::collections::HashMap<(String, Option<String>), usize> = endpoints
+        .iter()
+        .map(|ep| {
+            let name = ep.metadata.name.clone().unwrap_or_default();
+            let ns = ep.metadata.namespace.clone();
+            let count = ep
+                .subsets
+                .as_ref()
+                .map(|subsets| {
+                    subsets
+                        .iter()
+                        .map(|s| s.addresses.as_ref().map(|a| a.len()).unwrap_or(0))
+                        .sum::<usize>()
+                })
+                .unwrap_or(0);
+            ((name, ns), count)
+        })
+        .collect();
+
     services
         .iter()
         .map(|svc| {
@@ -425,26 +445,26 @@ pub fn services_to_items(services: &[Service]) -> Vec<ResourceItem> {
                 .and_then(|s| s.ports.as_ref().map(|p| p.len()))
                 .unwrap_or(0);
 
-            let svc_status = if service_type == "LoadBalancer" {
-                if let Some(svc_status) = &svc.status {
-                    if let Some(lb) = &svc_status.load_balancer {
-                        if let Some(ingress_list) = &lb.ingress {
-                            if !ingress_list.is_empty() {
-                                "Active".to_string()
-                            } else {
-                                "Pending".to_string()
-                            }
-                        } else {
-                            "Pending".to_string()
-                        }
-                    } else {
-                        "Pending".to_string()
-                    }
-                } else {
-                    "Pending".to_string()
-                }
-            } else {
+            let has_selector = spec
+                .and_then(|s| s.selector.as_ref())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+
+            let ep_count = endpoint_counts
+                .get(&(
+                    metadata.name.clone().unwrap_or_default(),
+                    metadata.namespace.clone(),
+                ))
+                .copied()
+                .unwrap_or(0);
+
+            let svc_status = if service_type == "ExternalName" || !has_selector {
+                // ExternalName or no-selector services — no endpoints expected
                 "Active".to_string()
+            } else if ep_count > 0 {
+                "Active".to_string()
+            } else {
+                "Pending".to_string()
             };
 
             ResourceItem {
