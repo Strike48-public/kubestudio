@@ -236,9 +236,7 @@ impl KubeClient {
 
         if selector.is_empty() {
             // No selector — try the Endpoints object for pod references
-            return self
-                .list_pods_from_endpoints(service_name, namespace)
-                .await;
+            return self.list_pods_from_endpoints(service_name, namespace).await;
         }
 
         let pod_api: Api<Pod> = Api::namespaced(self.inner.clone(), namespace);
@@ -273,12 +271,11 @@ impl KubeClient {
 
         for subset in &subsets {
             for addr in subset.addresses.as_deref().unwrap_or_default() {
-                if let Some(tr) = &addr.target_ref {
-                    if tr.kind.as_deref() == Some("Pod") {
-                        if let Some(name) = &tr.name {
-                            pod_names.push(name.clone());
-                        }
-                    }
+                if let Some(tr) = &addr.target_ref
+                    && tr.kind.as_deref() == Some("Pod")
+                    && let Some(name) = &tr.name
+                {
+                    pod_names.push(name.clone());
                 }
                 // Collect IPs as fallback
                 endpoint_ips.push(addr.ip.clone());
@@ -300,13 +297,14 @@ impl KubeClient {
 
         // Fallback: match endpoint IPs against pod IPs in the namespace
         if !endpoint_ips.is_empty() {
-            let all_pods = pod_api
-                .list(&ListParams::default())
-                .await
-                .map_err(|e| SkdError::KubeApi {
-                    status_code: 500,
-                    message: e.to_string(),
-                })?;
+            let all_pods =
+                pod_api
+                    .list(&ListParams::default())
+                    .await
+                    .map_err(|e| SkdError::KubeApi {
+                        status_code: 500,
+                        message: e.to_string(),
+                    })?;
 
             let pods: Vec<Pod> = all_pods
                 .items
@@ -315,9 +313,7 @@ impl KubeClient {
                     pod.status
                         .as_ref()
                         .and_then(|s| s.pod_ips.as_ref())
-                        .map(|ips| {
-                            ips.iter().any(|pip| endpoint_ips.contains(&pip.ip))
-                        })
+                        .map(|ips| ips.iter().any(|pip| endpoint_ips.contains(&pip.ip)))
                         .unwrap_or(false)
                 })
                 .collect();

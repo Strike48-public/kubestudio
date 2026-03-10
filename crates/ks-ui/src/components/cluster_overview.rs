@@ -389,9 +389,7 @@ fn count_pod_status(pods: &[Pod]) -> (usize, usize, usize) {
 
     for pod in pods {
         let status = pod.status.as_ref();
-        let phase = status
-            .and_then(|s| s.phase.as_deref())
-            .unwrap_or("Unknown");
+        let phase = status.and_then(|s| s.phase.as_deref()).unwrap_or("Unknown");
 
         match phase {
             "Running" => {
