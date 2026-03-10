@@ -381,24 +381,45 @@ fn count_node_status(nodes: &[Node]) -> (usize, usize) {
     (ready, not_ready)
 }
 
-/// Count pod statuses
+/// Count pod statuses, considering container-level health
 fn count_pod_status(pods: &[Pod]) -> (usize, usize, usize) {
     let mut running = 0;
     let mut pending = 0;
     let mut failed = 0;
 
     for pod in pods {
-        let phase = pod
-            .status
-            .as_ref()
+        let status = pod.status.as_ref();
+        let phase = status
             .and_then(|s| s.phase.as_deref())
             .unwrap_or("Unknown");
 
         match phase {
-            "Running" => running += 1,
+            "Running" => {
+                // Check container-level health: a pod in "Running" phase
+                // with crash-looping or non-ready containers is not truly healthy
+                let has_unhealthy_container = status
+                    .and_then(|s| s.container_statuses.as_ref())
+                    .map(|cs| {
+                        cs.iter().any(|c| {
+                            !c.ready
+                                || c.state
+                                    .as_ref()
+                                    .map(|s| s.waiting.is_some() || s.terminated.is_some())
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if has_unhealthy_container {
+                    failed += 1;
+                } else {
+                    running += 1;
+                }
+            }
             "Pending" => pending += 1,
             "Failed" => failed += 1,
-            _ => {}
+            "Succeeded" => {} // completed pods (e.g. jobs) — don't count
+            _ => failed += 1,
         }
     }
 
