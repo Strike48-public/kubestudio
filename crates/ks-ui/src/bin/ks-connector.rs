@@ -20,11 +20,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use dashmap::DashMap;
 use dioxus_liveview::LiveviewRouter as _;
 use futures::{SinkExt, StreamExt};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use ks_kube::{KubeClient, PermissionMode, Toolbox, auth, cleanup_orphaned_toolbox};
-use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1::EncodeRsaPrivateKey, pkcs8::EncodePublicKey};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -32,10 +29,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use strike48_connector::{
     AppManifest, AppPageRequest, AppPageResponse, BodyEncoding, ClientOptions, ConnectorBehavior,
-    ConnectorClient, ConnectorConfig, NavigationConfig, PayloadEncoding,
+    ConnectorClient, ConnectorConfig, NavigationConfig, OttProvider, PayloadEncoding,
 };
 use strike48_proto::proto::{
-    self, ConnectorCapabilities, CredentialsIssued, ExecuteResponse, HeartbeatRequest,
+    self, ConnectorCapabilities, ExecuteResponse, HeartbeatRequest,
     InstanceMetadata, RegisterConnectorRequest, StreamMessage, WebSocketCloseRequest,
     WebSocketFrame, WebSocketFrameType, WebSocketOpenRequest, WebSocketOpenResponse,
     stream_message::Message,
@@ -1375,157 +1372,6 @@ fn build_registration_message(config: &ConnectorConfig, jwt_token: Option<&str>)
     }
 }
 
-/// Credentials returned from OTT registration
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct OttCredentials {
-    client_id: String,
-    keycloak_url: String,
-    tenant_id: String,
-}
-
-/// Get keys directory path
-fn get_keys_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("MATRIX_KEYS_DIR") {
-        return PathBuf::from(dir);
-    }
-    home_dir().join(".matrix").join("keys")
-}
-
-/// Get private key path for this connector
-fn get_private_key_path(connector_type: &str, instance_id: &str) -> PathBuf {
-    get_keys_dir().join(format!("{}_{}.pem", connector_type, instance_id))
-}
-
-/// Get credentials file path
-fn get_credentials_path(connector_type: &str, instance_id: &str) -> PathBuf {
-    home_dir()
-        .join(".matrix")
-        .join("credentials")
-        .join(format!("{}_{}.json", connector_type, instance_id))
-}
-
-/// Cross-platform home directory (uses $HOME on Unix, %USERPROFILE% on Windows).
-fn home_dir() -> PathBuf {
-    #[cfg(unix)]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-    #[cfg(windows)]
-    {
-        std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-}
-
-/// Load or generate RSA keypair for this connector
-fn get_or_create_keypair(
-    connector_type: &str,
-    instance_id: &str,
-) -> anyhow::Result<(RsaPrivateKey, String)> {
-    let key_path = get_private_key_path(connector_type, instance_id);
-
-    if key_path.exists() {
-        // Load existing keypair
-        let key_pem = fs::read_to_string(&key_path)?;
-        let private_key = rsa::pkcs1::DecodeRsaPrivateKey::from_pkcs1_pem(&key_pem)
-            .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?;
-        let public_key = RsaPublicKey::from(&private_key);
-        let public_key_pem = public_key.to_public_key_pem(rsa::pkcs8::LineEnding::LF)?;
-        tracing::info!("Loaded existing keypair from {}", key_path.display());
-        return Ok((private_key, public_key_pem));
-    }
-
-    // Generate new keypair
-    tracing::info!("Generating new RSA keypair...");
-    let mut rng = rand::thread_rng();
-    let private_key = RsaPrivateKey::new(&mut rng, 2048)?;
-    let public_key = RsaPublicKey::from(&private_key);
-
-    // Save private key
-    let keys_dir = get_keys_dir();
-    if !keys_dir.exists() {
-        fs::create_dir_all(&keys_dir)?;
-    }
-
-    let private_key_pem = private_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
-    fs::write(&key_path, private_key_pem.as_bytes())?;
-
-    // Set permissions (Unix only)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&key_path)?.permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&key_path, perms)?;
-    }
-
-    let public_key_pem = public_key.to_public_key_pem(rsa::pkcs8::LineEnding::LF)?;
-    tracing::info!("Saved new keypair to {}", key_path.display());
-
-    Ok((private_key, public_key_pem))
-}
-
-/// Save credentials to disk
-fn save_credentials(
-    connector_type: &str,
-    instance_id: &str,
-    credentials: &OttCredentials,
-) -> anyhow::Result<()> {
-    let creds_path = get_credentials_path(connector_type, instance_id);
-    if let Some(parent) = creds_path.parent()
-        && !parent.exists()
-    {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(credentials)?;
-    fs::write(&creds_path, json)?;
-    tracing::info!("Saved credentials to {}", creds_path.display());
-    Ok(())
-}
-
-/// Load saved credentials from disk
-fn load_saved_credentials(connector_type: &str, instance_id: &str) -> Option<OttCredentials> {
-    let creds_path = get_credentials_path(connector_type, instance_id);
-    if creds_path.exists()
-        && let Ok(data) = fs::read_to_string(&creds_path)
-        && let Ok(creds) = serde_json::from_str(&data)
-    {
-        tracing::info!("Loaded saved credentials from {}", creds_path.display());
-        return Some(creds);
-    }
-    None
-}
-
-/// Create JWT client assertion for private_key_jwt authentication
-fn create_client_assertion(
-    private_key: &RsaPrivateKey,
-    credentials: &OttCredentials,
-) -> anyhow::Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let claims = serde_json::json!({
-        "iss": credentials.client_id,
-        "sub": credentials.client_id,
-        "aud": credentials.keycloak_url,
-        "exp": now + 60,
-        "iat": now,
-        "jti": uuid::Uuid::new_v4().to_string(),
-    });
-
-    let private_key_pem = private_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
-    let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())?;
-    let header = Header::new(Algorithm::RS256);
-
-    Ok(encode(&header, &claims, &encoding_key)?)
-}
-
 /// Build a reqwest client that respects MATRIX_TLS_INSECURE
 fn build_http_client() -> reqwest::Client {
     let insecure = std::env::var("MATRIX_TLS_INSECURE")
@@ -1538,156 +1384,9 @@ fn build_http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-/// Get access token from Keycloak using private_key_jwt
-async fn get_access_token(
-    private_key: &RsaPrivateKey,
-    credentials: &OttCredentials,
-) -> anyhow::Result<String> {
-    let client_assertion = create_client_assertion(private_key, credentials)?;
-
-    let token_url = format!(
-        "{}/protocol/openid-connect/token",
-        credentials.keycloak_url.trim_end_matches('/')
-    );
-
-    tracing::info!("Getting access token from {}", token_url);
-
-    let client = build_http_client();
-    let response = client
-        .post(&token_url)
-        .form(&[
-            ("grant_type", "client_credentials"),
-            ("client_id", &credentials.client_id),
-            (
-                "client_assertion_type",
-                "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-            ),
-            ("client_assertion", &client_assertion),
-        ])
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        #[derive(serde::Deserialize)]
-        struct TokenResponse {
-            access_token: String,
-        }
-        let token_resp: TokenResponse = response.json().await?;
-        tracing::info!("Access token obtained successfully");
-        Ok(token_resp.access_token)
-    } else {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token request failed: {} - {}", status, body);
-    }
-}
-
-/// Register with OTT and get credentials (including client_id for JWT auth)
-async fn register_with_ott(
-    creds: &CredentialsIssued,
-    config: &ConnectorConfig,
-) -> anyhow::Result<(OttCredentials, RsaPrivateKey)> {
-    // In StrikeHub mode, always use the server-provided URL for OTT registration
-    // because STRIKE48_API_URL points to StrikeHub's local auth proxy which
-    // doesn't have the /api/connectors/register-with-ott endpoint.
-    let api_base = if std::env::var("STRIKEHUB_SOCKET").is_ok() {
-        String::new()
-    } else {
-        std::env::var("STRIKE48_API_URL").unwrap_or_default()
-    };
-    let base_url = if api_base.is_empty() {
-        &creds.matrix_api_url
-    } else {
-        &api_base
-    };
-    let register_url = format!("{}{}", base_url, creds.register_url);
-    tracing::info!("Registering with OTT at: {}", register_url);
-
-    // Get or create RSA keypair
-    let (private_key, public_key_pem) =
-        get_or_create_keypair(&config.connector_type, &config.instance_id)?;
-
-    let payload = serde_json::json!({
-        "token": creds.ott,
-        "public_key": public_key_pem,
-        "connector_type": config.connector_type,
-        "instance_id": config.instance_id,
-    });
-
-    tracing::debug!(
-        "OTT registration payload: connector_type={}, instance_id={}",
-        config.connector_type,
-        config.instance_id
-    );
-
-    let client = build_http_client();
-
-    // Retry logic for cluster sync delays
-    const MAX_RETRIES: u32 = 4;
-    let mut last_error = String::new();
-
-    for attempt in 0..MAX_RETRIES {
-        if attempt > 0 {
-            let delay = std::cmp::min(500 * 2_u64.pow(attempt - 1), 3000);
-            tracing::warn!(
-                "OTT registration retry {}/{} after {}ms",
-                attempt + 1,
-                MAX_RETRIES,
-                delay
-            );
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-        }
-
-        let response = match client.post(&register_url).json(&payload).send().await {
-            Ok(resp) => resp,
-            Err(e) => {
-                last_error = format!("HTTP request failed: {}", e);
-                continue;
-            }
-        };
-
-        if response.status().is_success() {
-            let credentials: OttCredentials = response.json().await?;
-
-            // Save credentials to disk
-            save_credentials(&config.connector_type, &config.instance_id, &credentials)?;
-
-            return Ok((credentials, private_key));
-        }
-
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-
-        if status.as_u16() == 401 && body.contains("Invalid or expired") {
-            // Possible cluster sync delay - retry
-            last_error = body;
-            continue;
-        }
-
-        anyhow::bail!(
-            "Registration failed: {} {} - URL: {} - Body: {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("Unknown"),
-            register_url,
-            if body.is_empty() {
-                "(empty response)"
-            } else {
-                &body
-            }
-        );
-    }
-
-    anyhow::bail!(
-        "Registration failed after {} retries: {}",
-        MAX_RETRIES,
-        last_error
-    );
-}
-
 /// Auth context for reconnection
 struct AuthContext {
-    credentials: OttCredentials,
-    private_key: RsaPrivateKey,
+    ott_provider: OttProvider,
 }
 
 /// Sleep that can be interrupted by shutdown
@@ -1805,12 +1504,42 @@ async fn run_message_loop(
                             creds.register_url
                         );
 
-                        match register_with_ott(&creds, config).await {
-                            Ok((credentials, private_key)) => {
-                                tracing::info!("OTT registration successful, will reconnect with JWT");
+                        // In StrikeHub mode, always use the server-provided URL for OTT registration
+                        // because STRIKE48_API_URL points to StrikeHub's local auth proxy which
+                        // doesn't have the /api/connectors/register-with-ott endpoint.
+                        let api_base = if std::env::var("STRIKEHUB_SOCKET").is_ok() {
+                            String::new()
+                        } else {
+                            std::env::var("STRIKE48_API_URL").unwrap_or_default()
+                        };
+                        let ott_api_url = if api_base.is_empty() {
+                            &creds.matrix_api_url
+                        } else {
+                            &api_base
+                        };
+
+                        let mut ott_provider = OttProvider::new(
+                            Some(config.connector_type.clone()),
+                            Some(config.instance_id.clone()),
+                        );
+
+                        match ott_provider
+                            .register_public_key_with_ott_data(
+                                &creds.ott,
+                                ott_api_url,
+                                &creds.register_url,
+                                &config.connector_type,
+                                Some(&config.instance_id),
+                            )
+                            .await
+                        {
+                            Ok(response) => {
+                                tracing::info!(
+                                    "OTT registration successful (client_id={}), will reconnect with JWT",
+                                    response.client_id
+                                );
                                 return MessageLoopResult::Reconnect(AuthContext {
-                                    credentials,
-                                    private_key,
+                                    ott_provider,
                                 });
                             }
                             Err(e) => {
@@ -1958,19 +1687,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Try to load saved credentials first
     let mut auth_context: Option<AuthContext> = None;
-
-    if let Some(saved_creds) = load_saved_credentials(&config.connector_type, &config.instance_id) {
-        // Check if we have a corresponding private key
-        let key_path = get_private_key_path(&config.connector_type, &config.instance_id);
-        if key_path.exists()
-            && let Ok(key_pem) = fs::read_to_string(&key_path)
-            && let Ok(private_key) = rsa::pkcs1::DecodeRsaPrivateKey::from_pkcs1_pem(&key_pem)
+    {
+        let mut ott_provider = OttProvider::new(
+            Some(config.connector_type.clone()),
+            Some(config.instance_id.clone()),
+        );
+        if ott_provider
+            .load_saved_credentials(&config.connector_type, Some(&config.instance_id))
+            .is_some()
         {
             tracing::info!("Loaded saved credentials, will use JWT authentication");
-            auth_context = Some(AuthContext {
-                credentials: saved_creds,
-                private_key,
-            });
+            auth_context = Some(AuthContext { ott_provider });
         }
     }
 
@@ -1981,10 +1708,10 @@ async fn main() -> anyhow::Result<()> {
         }
 
         // Get JWT token if we have credentials
-        let jwt_token = if let Some(ref ctx) = auth_context {
-            match get_access_token(&ctx.private_key, &ctx.credentials).await {
+        let jwt_token = if let Some(ref mut ctx) = auth_context {
+            match ctx.ott_provider.get_token().await {
                 Ok(token) => {
-                    tracing::info!("Got access token from Keycloak");
+                    tracing::info!("Got access token via OttProvider");
                     Some(token)
                 }
                 Err(e) => {

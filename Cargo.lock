@@ -3400,7 +3400,6 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
- "jsonwebtoken",
  "k8s-openapi",
  "ks-core",
  "ks-kube",
@@ -3409,11 +3408,9 @@ dependencies = [
  "kube",
  "lucide-dioxus",
  "pulldown-cmark",
- "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
- "rsa",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3426,7 +3423,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "uuid",
 ]
 
 [[package]]
