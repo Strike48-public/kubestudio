@@ -136,7 +136,7 @@ pub fn ApplyManifest(props: ApplyManifestProps) -> Element {
                             return;
                         }
 
-                        if e.key() == Key::Escape {
+                        if crate::utils::is_escape(&e) {
                             on_close.call(());
                             e.stop_propagation();
                             e.prevent_default();
@@ -148,17 +148,14 @@ pub fn ApplyManifest(props: ApplyManifestProps) -> Element {
                         e.stop_propagation();
                     }
                     ApplyManifestState::Results { .. } | ApplyManifestState::Error(_) => {
-                        match e.key() {
-                            Key::Escape | Key::Enter => {
-                                on_close.call(());
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            _ => {}
+                        if crate::utils::is_escape(&e) || e.key() == Key::Enter {
+                            on_close.call(());
+                            e.stop_propagation();
+                            e.prevent_default();
                         }
                     }
                     _ => {
-                        if e.key() == Key::Escape {
+                        if crate::utils::is_escape(&e) {
                             on_close.call(());
                             e.stop_propagation();
                             e.prevent_default();

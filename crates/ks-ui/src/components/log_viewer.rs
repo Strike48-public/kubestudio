@@ -245,56 +245,54 @@ pub fn LogViewer(props: LogViewerProps) -> Element {
                             });
                         },
                         onkeydown: move |e: KeyboardEvent| {
-                            match e.key() {
-                                Key::Character(ref c) if !e.modifiers().ctrl() && !e.modifiers().meta() => {
-                                    match c.as_str() {
-                                        "w" => {
-                                            let new_wrap = !*text_wrap.read();
-                                            text_wrap.set(new_wrap);
-                                            e.stop_propagation();
-                                            e.prevent_default();
-                                        }
-                                        "f" => {
-                                            // Toggle follow mode
-                                            let new_following = !*following.read();
-                                            following.set(new_following);
-                                            // If re-enabling follow, scroll to bottom
-                                            if new_following {
-                                                should_scroll.set(true);
+                            if crate::utils::is_escape(&e) {
+                                on_back_key.call(());
+                                e.stop_propagation();
+                            } else {
+                                match e.key() {
+                                    Key::Character(ref c) if !e.modifiers().ctrl() && !e.modifiers().meta() => {
+                                        match c.as_str() {
+                                            "w" => {
+                                                let new_wrap = !*text_wrap.read();
+                                                text_wrap.set(new_wrap);
+                                                e.stop_propagation();
+                                                e.prevent_default();
                                             }
-                                            e.stop_propagation();
-                                            e.prevent_default();
-                                        }
-                                        "t" => {
-                                            // Toggle timestamps display
-                                            let new_timestamps = !*show_timestamps.read();
-                                            show_timestamps.set(new_timestamps);
-                                            e.stop_propagation();
-                                            e.prevent_default();
-                                        }
-                                        _ => {
-                                            e.stop_propagation();
+                                            "f" => {
+                                                // Toggle follow mode
+                                                let new_following = !*following.read();
+                                                following.set(new_following);
+                                                if new_following {
+                                                    should_scroll.set(true);
+                                                }
+                                                e.stop_propagation();
+                                                e.prevent_default();
+                                            }
+                                            "t" => {
+                                                let new_timestamps = !*show_timestamps.read();
+                                                show_timestamps.set(new_timestamps);
+                                                e.stop_propagation();
+                                                e.prevent_default();
+                                            }
+                                            _ => {
+                                                e.stop_propagation();
+                                            }
                                         }
                                     }
-                                }
-                                Key::Escape => {
-                                    on_back_key.call(());
-                                    e.stop_propagation();
-                                }
-                                Key::ArrowUp | Key::PageUp => {
-                                    // Pause following when scrolling up
-                                    if *following.read() {
-                                        following.set(false);
+                                    Key::ArrowUp | Key::PageUp => {
+                                        if *following.read() {
+                                            following.set(false);
+                                        }
+                                        e.stop_propagation();
                                     }
-                                    e.stop_propagation();
+                                    Key::ArrowDown | Key::PageDown | Key::End => {
+                                        e.stop_propagation();
+                                    }
+                                    Key::ArrowLeft | Key::ArrowRight | Key::Home => {
+                                        e.stop_propagation();
+                                    }
+                                    _ => {}
                                 }
-                                Key::ArrowDown | Key::PageDown | Key::End => {
-                                    e.stop_propagation();
-                                }
-                                Key::ArrowLeft | Key::ArrowRight | Key::Home => {
-                                    e.stop_propagation();
-                                }
-                                _ => {}
                             }
                         },
                         onscroll: move |_| {
