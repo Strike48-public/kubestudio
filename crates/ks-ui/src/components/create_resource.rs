@@ -90,65 +90,65 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                 let current_state = state.read().clone();
                 match current_state {
                     CreateState::SelectTemplate => {
-                        match e.key() {
-                            Key::Escape => {
-                                on_close.call(());
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::ArrowDown => {
-                                keyboard_nav_active.set(true);
-                                let current = *selected_index.read();
-                                if current < TEMPLATES.len() - 1 {
-                                    selected_index.set(current + 1);
+                        if crate::utils::is_escape(&e) {
+                            on_close.call(());
+                            e.stop_propagation();
+                            e.prevent_default();
+                        } else {
+                            match e.key() {
+                                Key::ArrowDown => {
+                                    keyboard_nav_active.set(true);
+                                    let current = *selected_index.read();
+                                    if current < TEMPLATES.len() - 1 {
+                                        selected_index.set(current + 1);
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
                                 }
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::Character(ref c) if c == "j" => {
-                                keyboard_nav_active.set(true);
-                                let current = *selected_index.read();
-                                if current < TEMPLATES.len() - 1 {
-                                    selected_index.set(current + 1);
+                                Key::Character(ref c) if c == "j" => {
+                                    keyboard_nav_active.set(true);
+                                    let current = *selected_index.read();
+                                    if current < TEMPLATES.len() - 1 {
+                                        selected_index.set(current + 1);
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
                                 }
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::ArrowUp => {
-                                keyboard_nav_active.set(true);
-                                let current = *selected_index.read();
-                                if current > 0 {
-                                    selected_index.set(current - 1);
+                                Key::ArrowUp => {
+                                    keyboard_nav_active.set(true);
+                                    let current = *selected_index.read();
+                                    if current > 0 {
+                                        selected_index.set(current - 1);
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
                                 }
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::Character(ref c) if c == "k" => {
-                                keyboard_nav_active.set(true);
-                                let current = *selected_index.read();
-                                if current > 0 {
-                                    selected_index.set(current - 1);
+                                Key::Character(ref c) if c == "k" => {
+                                    keyboard_nav_active.set(true);
+                                    let current = *selected_index.read();
+                                    if current > 0 {
+                                        selected_index.set(current - 1);
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
                                 }
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::Enter => {
-                                let idx = *selected_index.read();
-                                if let Some(template) = TEMPLATES.get(idx) {
-                                    // Replace namespace in template if provided
-                                    let yaml = if let Some(ns) = &namespace_for_keydown {
-                                        template.yaml.replace("namespace: default", &format!("namespace: {}", ns))
-                                    } else {
-                                        template.yaml.to_string()
-                                    };
-                                    edited_yaml.set(yaml.clone());
-                                    state.set(CreateState::EditYaml(yaml));
+                                Key::Enter => {
+                                    let idx = *selected_index.read();
+                                    if let Some(template) = TEMPLATES.get(idx) {
+                                        let yaml = if let Some(ns) = &namespace_for_keydown {
+                                            template.yaml.replace("namespace: default", &format!("namespace: {}", ns))
+                                        } else {
+                                            template.yaml.to_string()
+                                        };
+                                        edited_yaml.set(yaml.clone());
+                                        state.set(CreateState::EditYaml(yaml));
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
                                 }
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            _ => {
-                                e.stop_propagation();
+                                _ => {
+                                    e.stop_propagation();
+                                }
                             }
                         }
                     }
@@ -180,7 +180,7 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                             return;
                         }
 
-                        if e.key() == Key::Escape {
+                        if crate::utils::is_escape(&e) {
                             // Go back to template selection and refocus container
                             state.set(CreateState::SelectTemplate);
                             should_refocus.set(true);
@@ -194,13 +194,10 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                         e.stop_propagation();
                     }
                     CreateState::Success(_) | CreateState::Error(_) => {
-                        match e.key() {
-                            Key::Escape | Key::Enter => {
-                                on_close.call(());
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            _ => {}
+                        if crate::utils::is_escape(&e) || e.key() == Key::Enter {
+                            on_close.call(());
+                            e.stop_propagation();
+                            e.prevent_default();
                         }
                     }
                     _ => {}

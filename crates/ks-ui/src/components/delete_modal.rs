@@ -40,31 +40,31 @@ pub fn DeleteModal(props: DeleteModalProps) -> Element {
     // Handle keyboard navigation
     let target_for_confirm = target.clone();
     let onkeydown = move |e: KeyboardEvent| {
-        match e.key() {
-            Key::Escape => {
-                props.on_cancel.call(());
-                e.stop_propagation();
-            }
-            Key::Enter => {
-                if let Some(true) = *selected_option.read() {
-                    props.on_confirm.call(target_for_confirm.clone());
-                } else if let Some(false) = *selected_option.read() {
-                    props.on_cancel.call(());
+        if crate::utils::is_escape(&e) {
+            props.on_cancel.call(());
+            e.stop_propagation();
+        } else {
+            match e.key() {
+                Key::Enter => {
+                    if let Some(true) = *selected_option.read() {
+                        props.on_confirm.call(target_for_confirm.clone());
+                    } else if let Some(false) = *selected_option.read() {
+                        props.on_cancel.call(());
+                    }
+                    e.stop_propagation();
                 }
-                e.stop_propagation();
-            }
-            Key::ArrowLeft | Key::ArrowRight | Key::Tab => {
-                // Toggle between options
-                let current = *selected_option.read();
-                match current {
-                    None => selected_option.set(Some(false)), // Start with cancel (safer)
-                    Some(true) => selected_option.set(Some(false)),
-                    Some(false) => selected_option.set(Some(true)),
+                Key::ArrowLeft | Key::ArrowRight | Key::Tab => {
+                    let current = *selected_option.read();
+                    match current {
+                        None => selected_option.set(Some(false)),
+                        Some(true) => selected_option.set(Some(false)),
+                        Some(false) => selected_option.set(Some(true)),
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
                 }
-                e.stop_propagation();
-                e.prevent_default();
+                _ => {}
             }
-            _ => {}
         }
     };
 
