@@ -87,18 +87,18 @@ spec:
               protocol: TCP
           {{- if eq .Values.mode "ai-enabled" }}
           livenessProbe:
-            exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            tcpSocket:
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            tcpSocket:
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           startupProbe:
-            exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+            tcpSocket:
+              port: http
             failureThreshold: 30
             periodSeconds: 2
           {{- else }}
