@@ -527,7 +527,13 @@ async fn start_dioxus_server(ipc_addr: ks_ui::ipc::IpcAddr) {
         .route("/health", get(|| async { "OK" }))
         .route(
             "/connector/info",
-            get(|| async { axum::Json(serde_json::to_value(app_manifest()).unwrap()) }),
+            get(|| async {
+                let cluster_name = match auth::load_kubeconfig(None).await {
+                    Ok(kc) => auth::current_context(&kc),
+                    Err(_) => None,
+                };
+                axum::Json(serde_json::to_value(app_manifest(cluster_name.as_deref())).unwrap())
+            }),
         )
         .route(
             "/auth/status",
@@ -1308,16 +1314,28 @@ fn tool_schemas() -> serde_json::Value {
 }
 
 /// Return the app manifest for this connector.
-fn app_manifest() -> AppManifest {
-    AppManifest::new("KubeStudio", "/")
-        .description("Kubernetes cluster management dashboard")
-        .icon("hero-server-stack")
-        .navigation(NavigationConfig::nested(&["Apps"]))
+/// When a cluster name is provided the sidebar shows KubeStudio > cluster.
+/// Without a cluster name it falls back to KubeStudio at the top level.
+fn app_manifest(cluster_name: Option<&str>) -> AppManifest {
+    match cluster_name {
+        Some(name) => AppManifest::new(name, "/")
+            .description("Kubernetes cluster management dashboard")
+            .icon("hero-server-stack")
+            .navigation(NavigationConfig::nested(&["KubeStudio"])),
+        None => AppManifest::new("KubeStudio", "/")
+            .description("Kubernetes cluster management dashboard")
+            .icon("hero-server-stack")
+            .navigation(NavigationConfig::top_level()),
+    }
 }
 
 /// Build the registration message
-fn build_registration_message(config: &ConnectorConfig, jwt_token: Option<&str>) -> StreamMessage {
-    let manifest = app_manifest();
+fn build_registration_message(
+    config: &ConnectorConfig,
+    jwt_token: Option<&str>,
+    cluster_name: Option<&str>,
+) -> StreamMessage {
+    let manifest = app_manifest(cluster_name);
 
     // Serialize manifest and inject api_access (field not yet in SDK 0.1.x).
     // Matrix reads api_access from the JSON manifest to decide on user consent.
@@ -1344,7 +1362,7 @@ fn build_registration_message(config: &ConnectorConfig, jwt_token: Option<&str>)
     );
 
     let capabilities = ConnectorCapabilities {
-        connector_type: "app-kube-studio".to_string(),
+        connector_type: config.connector_type.clone(),
         version: "1.0.0".to_string(),
         supported_encodings: vec![PayloadEncoding::Json as i32],
         behaviors: vec![
@@ -1357,7 +1375,7 @@ fn build_registration_message(config: &ConnectorConfig, jwt_token: Option<&str>)
 
     let register_request = RegisterConnectorRequest {
         tenant_id: config.tenant_id.clone(),
-        connector_type: "app-kube-studio".to_string(),
+        connector_type: config.connector_type.clone(),
         instance_id: config.instance_id.clone(),
         capabilities: Some(capabilities),
         jwt_token: jwt_token.unwrap_or(&config.auth_token).to_string(),
@@ -1884,7 +1902,7 @@ async fn main() -> anyhow::Result<()> {
     let ipc = dioxus_ipc();
 
     match ipc_http_get(ipc, "/health").await {
-        Ok((status, _, _)) if status == 200 => {
+        Ok((200, _, _)) => {
             tracing::info!("Dioxus liveview server is ready ({})", ipc);
         }
         Ok((status, _, _)) => {
@@ -1902,10 +1920,31 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|_| std::env::var("STRIKE48_HOST"))
         .unwrap_or_default();
     let mut config = ConnectorConfig::from_env();
-    config.connector_type = "app-kube-studio".to_string();
+    // CONNECTOR_NAME overrides the gateway identity so each connector gets its
+    // own sidebar entry instead of round-robining under a shared gateway.
+    // Default: "app-kube-studio" (all instances share one gateway).
+    config.connector_type =
+        std::env::var("CONNECTOR_NAME").unwrap_or_else(|_| "app-kube-studio".to_string());
 
     if let Ok(instance_id) = std::env::var("INSTANCE_ID") {
         config.instance_id = instance_id;
+    }
+
+    // Resolve the default cluster name from kubeconfig for dynamic naming.
+    // This is used both for the sidebar nav (KubeStudio > cluster) and to
+    // make the instance_id unique per cluster so Matrix doesn't round-robin
+    // between connectors targeting different clusters.
+    let default_cluster_name: Option<String> = match auth::load_kubeconfig(None).await {
+        Ok(kc) => auth::current_context(&kc),
+        Err(_) => None,
+    };
+
+    // Append the cluster name to instance_id when no explicit INSTANCE_ID was
+    // provided, ensuring each cluster gets a distinct connector identity.
+    if std::env::var("INSTANCE_ID").is_err()
+        && let Some(ref cluster) = default_cluster_name
+    {
+        config.instance_id = format!("{}-{}", config.instance_id, cluster);
     }
 
     // Store tenant_id in the global session so the ChatPanel (liveview)
@@ -1921,7 +1960,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Registering with Matrix as APP + TOOL connector...");
     tracing::info!("  - Host: {}", config.host);
     tracing::info!("  - Tenant: {}", config.tenant_id);
+    tracing::info!("  - Gateway: {}", config.connector_type);
     tracing::info!("  - Instance: {}", config.instance_id);
+    if let Some(ref cluster) = default_cluster_name {
+        tracing::info!("  - Cluster: {}", cluster);
+    }
     tracing::info!(
         "  - Permission Mode: {} (set KUBESTUDIO_MODE=read|write to change)",
         mode_str
@@ -2016,7 +2059,11 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Connected to Matrix, starting stream...");
 
         // Build registration message (with JWT if we have one)
-        let registration_msg = build_registration_message(&config, jwt_token.as_deref());
+        let registration_msg = build_registration_message(
+            &config,
+            jwt_token.as_deref(),
+            default_cluster_name.as_deref(),
+        );
 
         // Start bidirectional stream
         let (tx, rx) = match client
