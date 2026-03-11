@@ -2120,8 +2120,10 @@ async fn main() -> anyhow::Result<()> {
                     );
                     // Remove saved credentials and keypair so the next
                     // iteration falls through to post-approval OTT flow.
-                    let creds_path = get_credentials_path(&config.connector_type, &config.instance_id);
-                    let key_path = get_private_key_path(&config.connector_type, &config.instance_id);
+                    let creds_path =
+                        get_credentials_path(&config.connector_type, &config.instance_id);
+                    let key_path =
+                        get_private_key_path(&config.connector_type, &config.instance_id);
                     if creds_path.exists() {
                         let _ = fs::remove_file(&creds_path);
                     }
