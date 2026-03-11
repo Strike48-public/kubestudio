@@ -1,8 +1,8 @@
 # ============================================================
-# KubeStudio — multi-arch minimal container image
+# KubeStudio — multi-arch scratch container image
 # ============================================================
-# Multi-stage build with cargo-chef caching and buildx multi-arch.
-# Uses debian-slim runtime (required for native-tls/OpenSSL deps).
+# Builds statically-linked binaries (musl) for a scratch runtime.
+# Requires rustls-only TLS (no OpenSSL/native-tls).
 #
 # Usage:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -21,53 +21,89 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ----------------------------------------------------------
-# Stage 2: Builder (native compile per target arch)
+# Stage 2: cross-compile builder
 # ----------------------------------------------------------
-FROM rust:1.88-bookworm AS builder
+FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev protobuf-compiler \
+    pkg-config protobuf-compiler \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+    musl-tools \
     && rm -rf /var/lib/apt/lists/*
+
+# Install musl cross-compiler for arm64
+RUN <<EOF
+#!/bin/bash
+set -e
+if [ "$(dpkg --print-architecture)" = "amd64" ]; then
+  apt-get update && apt-get install -y --no-install-recommends \
+    musl-dev:arm64 2>/dev/null || true
+  # Download musl cross toolchain if musl-dev:arm64 not available
+  if [ ! -f /usr/lib/aarch64-linux-musl/libc.a ]; then
+    curl -sL https://musl.cc/aarch64-linux-musl-cross.tgz | tar xz -C /opt/
+  fi
+fi
+rm -rf /var/lib/apt/lists/*
+EOF
+
+# Install musl targets
+RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 
 RUN cargo install cargo-chef --locked
 
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 
+# Determine target triple and set linker
+RUN <<EOF
+#!/bin/bash
+set -e
+case "$TARGETPLATFORM" in
+  linux/arm64) echo "aarch64-unknown-linux-musl" > /tmp/rust-target ;;
+  *)           echo "x86_64-unknown-linux-musl" > /tmp/rust-target ;;
+esac
+EOF
+
+# Cross-compilation env for arm64 musl
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc
+ENV CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc
+
 # Pre-cache dependencies
-RUN cargo chef cook --release --recipe-path recipe.json \
+RUN RUST_TARGET=$(cat /tmp/rust-target) && \
+    cargo chef cook --release --recipe-path recipe.json \
+    --target "$RUST_TARGET" \
     --features server,connector --no-default-features -p ks-ui
 
 # Build actual binaries
 COPY . .
-RUN cargo build --release \
+RUN RUST_TARGET=$(cat /tmp/rust-target) && \
+    cargo build --release \
+    --target "$RUST_TARGET" \
     --bin ks-server --bin ks-connector \
-    --features server,connector --no-default-features -p ks-ui
+    --features server,connector --no-default-features -p ks-ui && \
+    mkdir -p /out && \
+    cp target/"$(cat /tmp/rust-target)"/release/ks-server /out/ && \
+    cp target/"$(cat /tmp/rust-target)"/release/ks-connector /out/
 
 # ----------------------------------------------------------
-# Stage 3: Minimal runtime
+# Stage 3: Scratch runtime — zero OS, just the binaries
 # ----------------------------------------------------------
-FROM debian:bookworm-slim
+FROM scratch
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 tini \
-    && rm -rf /var/lib/apt/lists/*
+# CA certificates for TLS
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Non-root user
-RUN groupadd --gid 999 kubestudio \
-    && useradd --uid 999 --gid kubestudio --shell /bin/false kubestudio
+# Static binaries
+COPY --from=builder /out/ks-server /usr/local/bin/ks-server
+COPY --from=builder /out/ks-connector /usr/local/bin/ks-connector
 
-COPY --from=builder /app/target/release/ks-server /usr/local/bin/ks-server
-COPY --from=builder /app/target/release/ks-connector /usr/local/bin/ks-connector
-
-# Kubeconfig mount point
-RUN mkdir -p /etc/kubestudio/kubeconfigs && \
-    chown -R kubestudio:kubestudio /etc/kubestudio
-
-USER kubestudio
+# Non-root user (numeric, since scratch has no /etc/passwd)
+USER 999:999
 
 ENV PORT=8080
 EXPOSE 8080
 
-ENTRYPOINT ["tini", "--"]
-CMD ["ks-server"]
+ENTRYPOINT ["ks-server"]
