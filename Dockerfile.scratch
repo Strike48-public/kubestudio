@@ -1,8 +1,8 @@
 # ============================================================
-# KubeStudio — multi-arch scratch container image
+# KubeStudio — multi-arch minimal container image
 # ============================================================
-# Builds statically-linked musl binaries for a scratch runtime.
-# Each target arch builds natively via QEMU (no cross-compilation).
+# Uses gcr.io/distroless/cc-debian12 as runtime — ~25MB base with
+# libc + libssl + CA certs, no shell, no package manager.
 #
 # Usage:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -21,58 +21,36 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ----------------------------------------------------------
-# Stage 2: Builder (runs natively per target arch via QEMU)
+# Stage 2: Builder (native per target arch via QEMU)
 # ----------------------------------------------------------
 FROM rust:1.88-bookworm AS builder
 
-ARG TARGETARCH
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config protobuf-compiler musl-tools \
+    pkg-config libssl-dev protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
-
-# Install the musl target for the current arch
-RUN case "$TARGETARCH" in \
-      arm64) rustup target add aarch64-unknown-linux-musl ;; \
-      *)     rustup target add x86_64-unknown-linux-musl ;; \
-    esac
 
 RUN cargo install cargo-chef --locked
 
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 
-# Determine rust target triple
-RUN case "$TARGETARCH" in \
-      arm64) echo "aarch64-unknown-linux-musl" > /tmp/rust-target ;; \
-      *)     echo "x86_64-unknown-linux-musl" > /tmp/rust-target ;; \
-    esac
-
 # Pre-cache dependencies
-RUN RUST_TARGET=$(cat /tmp/rust-target) && \
-    cargo chef cook --release --recipe-path recipe.json \
-    --target "$RUST_TARGET" \
+RUN cargo chef cook --release --recipe-path recipe.json \
     --features server,connector --no-default-features -p ks-ui
 
 # Build actual binaries
 COPY . .
-RUN RUST_TARGET=$(cat /tmp/rust-target) && \
-    cargo build --release \
-    --target "$RUST_TARGET" \
+RUN cargo build --release \
     --bin ks-server --bin ks-connector \
-    --features server,connector --no-default-features -p ks-ui && \
-    mkdir -p /out && \
-    cp target/"$(cat /tmp/rust-target)"/release/ks-server /out/ && \
-    cp target/"$(cat /tmp/rust-target)"/release/ks-connector /out/
+    --features server,connector --no-default-features -p ks-ui
 
 # ----------------------------------------------------------
-# Stage 3: Scratch — zero OS, just the static binaries
+# Stage 3: Distroless — no shell, no pkg manager, ~25MB
 # ----------------------------------------------------------
-FROM scratch
+FROM gcr.io/distroless/cc-debian12
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /out/ks-server /usr/local/bin/ks-server
-COPY --from=builder /out/ks-connector /usr/local/bin/ks-connector
+COPY --from=builder /app/target/release/ks-server /usr/local/bin/ks-server
+COPY --from=builder /app/target/release/ks-connector /usr/local/bin/ks-connector
 
 USER 999:999
 
