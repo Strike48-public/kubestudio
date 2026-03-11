@@ -1,7 +1,8 @@
 # ============================================================
-# KubeStudio — multi-arch scratch container image
+# KubeStudio — multi-arch minimal container image
 # ============================================================
-# Builds statically-linked binaries for scratch runtime.
+# Multi-stage build with cargo-chef caching and buildx multi-arch.
+# Uses debian-slim runtime (required for native-tls/OpenSSL deps).
 #
 # Usage:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -20,79 +21,53 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ----------------------------------------------------------
-# Stage 2: cross-compile builder
+# Stage 2: Builder (native compile per target arch)
 # ----------------------------------------------------------
-FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
-
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
+FROM rust:1.88-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev protobuf-compiler \
-    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
     && rm -rf /var/lib/apt/lists/*
 
-# Install musl targets for static linking
-RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-
-# Install musl-tools for the build host
-RUN apt-get update && apt-get install -y --no-install-recommends musl-tools && rm -rf /var/lib/apt/lists/*
-
-# Install cargo-chef
 RUN cargo install cargo-chef --locked
 
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 
-# Set target based on platform
-RUN <<EOF
-#!/bin/bash
-set -e
-case "$TARGETPLATFORM" in
-  linux/arm64) echo "aarch64-unknown-linux-musl" > /tmp/rust-target ;;
-  *)           echo "x86_64-unknown-linux-musl" > /tmp/rust-target ;;
-esac
-EOF
-
-# Configure cross-compilation for arm64
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc
-ENV CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc
-
 # Pre-cache dependencies
-RUN RUST_TARGET=$(cat /tmp/rust-target) && \
-    RUSTFLAGS='-C target-feature=+crt-static' \
-    cargo chef cook --release --recipe-path recipe.json \
-    --target "$RUST_TARGET" \
+RUN cargo chef cook --release --recipe-path recipe.json \
     --features server,connector --no-default-features -p ks-ui
 
 # Build actual binaries
 COPY . .
-RUN RUST_TARGET=$(cat /tmp/rust-target) && \
-    RUSTFLAGS='-C target-feature=+crt-static' \
-    cargo build --release \
-    --target "$RUST_TARGET" \
+RUN cargo build --release \
     --bin ks-server --bin ks-connector \
-    --features server,connector --no-default-features -p ks-ui && \
-    mkdir -p /out && \
-    cp target/"$(cat /tmp/rust-target)"/release/ks-server /out/ && \
-    cp target/"$(cat /tmp/rust-target)"/release/ks-connector /out/
+    --features server,connector --no-default-features -p ks-ui
 
 # ----------------------------------------------------------
-# Stage 3: Scratch runtime
+# Stage 3: Minimal runtime
 # ----------------------------------------------------------
-FROM scratch
+FROM debian:bookworm-slim
 
-# CA certificates for TLS
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libssl3 tini \
+    && rm -rf /var/lib/apt/lists/*
 
-# Static binaries
-COPY --from=builder /out/ks-server /usr/local/bin/ks-server
-COPY --from=builder /out/ks-connector /usr/local/bin/ks-connector
+# Non-root user
+RUN groupadd --gid 999 kubestudio \
+    && useradd --uid 999 --gid kubestudio --shell /bin/false kubestudio
 
-# Non-root user (numeric, since scratch has no /etc/passwd)
-USER 999:999
+COPY --from=builder /app/target/release/ks-server /usr/local/bin/ks-server
+COPY --from=builder /app/target/release/ks-connector /usr/local/bin/ks-connector
+
+# Kubeconfig mount point
+RUN mkdir -p /etc/kubestudio/kubeconfigs && \
+    chown -R kubestudio:kubestudio /etc/kubestudio
+
+USER kubestudio
 
 ENV PORT=8080
 EXPOSE 8080
 
-ENTRYPOINT ["ks-server"]
+ENTRYPOINT ["tini", "--"]
+CMD ["ks-server"]
