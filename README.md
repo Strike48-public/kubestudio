@@ -92,6 +92,7 @@ cargo run --features connector --no-default-features --bin ks-connector
 | `STRIKE48_API_URL` | Strike48 Prospector Studio API base URL |
 | `TENANT_ID` | Tenant identifier |
 | `INSTANCE_ID` | Connector instance name |
+| `CONNECTOR_NAME` | Override gateway identity (default: `app-kube-studio`). Set a unique value per connector to get separate sidebar entries instead of round-robin |
 | `MATRIX_TLS_INSECURE` | Skip TLS verification (dev only) |
 
 ### Docker

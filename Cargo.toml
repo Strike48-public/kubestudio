@@ -55,8 +55,8 @@ tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 dashmap = "6"
 
 # Connector SDK
-strike48-connector = "0.2.7"
-strike48-proto = "0.2.7"
+strike48-connector = "0.2.9"
+strike48-proto = "0.2.9"
 
 # Web server (for connector mode)
 axum = "0.7"

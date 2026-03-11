@@ -6106,9 +6106,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strike48-connector"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71cd9583891de4bfb272d2e8d2817c1e8bf0403f2328c391938b5ac15c2edbf4"
+checksum = "0bbaa18c49824b91e5373fdac1f771b02f9bd37b24bea66d3930668da362cb5f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6152,9 +6152,9 @@ dependencies = [
 
 [[package]]
 name = "strike48-proto"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a01870b2b34d2bba32978fbd132631ac58f11634cfbb7b9bf6a4e9093ddc1e50"
+checksum = "5b203c66fe160e55359bc1a580b0db7655cff7f812519231f64a98d8b2f01c01"
 dependencies = [
  "prost",
  "prost-types",
