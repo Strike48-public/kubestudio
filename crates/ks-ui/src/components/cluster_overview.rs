@@ -3,6 +3,7 @@
 use dioxus::prelude::*;
 use k8s_openapi::api::core::v1::{Event, Node, Pod};
 use lucide_dioxus::{Check, Globe, Package, Rocket, Server, TriangleAlert};
+use std::collections::HashMap;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ClusterOverviewProps {
@@ -67,11 +68,51 @@ pub fn ClusterOverview(props: ClusterOverviewProps) -> Element {
     let (running_pods, pending_pods, failed_pods) = count_pod_status(&props.pods);
     let total_pods = props.pods.len();
 
-    // Get recent warning events (last 10)
+    // Toggle: false = "Clean" (hide resolved), true = "All" (show everything)
+    let mut show_all_warnings = use_signal(|| false);
+
+    // Build a lookup of healthy pod names for resolved-event filtering
+    let healthy_pods: HashMap<(Option<&str>, &str), bool> = props
+        .pods
+        .iter()
+        .filter_map(|pod| {
+            let name = pod.metadata.name.as_deref()?;
+            let ns = pod.metadata.namespace.as_deref();
+            let phase = pod.status.as_ref()?.phase.as_deref()?;
+            let containers_ready = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.container_statuses.as_ref())
+                .map(|cs| cs.iter().all(|c| c.ready))
+                .unwrap_or(false);
+            if phase == "Running" && containers_ready {
+                Some(((ns, name), true))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Get recent warning events (last 10), optionally filtering out resolved
     let warning_events: Vec<_> = props
         .events
         .iter()
         .filter(|e| e.type_.as_deref() == Some("Warning"))
+        .filter(|e| {
+            if *show_all_warnings.read() {
+                return true;
+            }
+            // Check if the involved resource is a healthy pod
+            let involved = &e.involved_object;
+            let kind = involved.kind.as_deref().unwrap_or("");
+            if kind == "Pod" {
+                let name = involved.name.as_deref().unwrap_or("");
+                let ns = involved.namespace.as_deref();
+                !healthy_pods.contains_key(&(ns, name))
+            } else {
+                true // Keep non-pod warnings
+            }
+        })
         .take(10)
         .collect();
 
@@ -227,6 +268,23 @@ pub fn ClusterOverview(props: ClusterOverviewProps) -> Element {
                     if !warning_events.is_empty() {
                         span { class: "warning-count", "{warning_events.len()}" }
                     }
+                    {
+                        let showing_all = *show_all_warnings.read();
+                        rsx! {
+                            div {
+                                class: "warning-toggle",
+                                title: if showing_all { "Showing all — click to hide resolved" } else { "Hiding resolved — click to show all" },
+                                onclick: move |_| {
+                                    let current = *show_all_warnings.read();
+                                    show_all_warnings.set(!current);
+                                },
+                                span { class: "toggle-label", "Show resolved" }
+                                div { class: if showing_all { "toggle-track on" } else { "toggle-track" },
+                                    div { class: "toggle-thumb" }
+                                }
+                            }
+                        }
+                    }
                 }
                 if warning_events.is_empty() {
                     div { class: "no-warnings",
@@ -323,24 +381,43 @@ fn count_node_status(nodes: &[Node]) -> (usize, usize) {
     (ready, not_ready)
 }
 
-/// Count pod statuses
+/// Count pod statuses, considering container-level health
 fn count_pod_status(pods: &[Pod]) -> (usize, usize, usize) {
     let mut running = 0;
     let mut pending = 0;
     let mut failed = 0;
 
     for pod in pods {
-        let phase = pod
-            .status
-            .as_ref()
-            .and_then(|s| s.phase.as_deref())
-            .unwrap_or("Unknown");
+        let status = pod.status.as_ref();
+        let phase = status.and_then(|s| s.phase.as_deref()).unwrap_or("Unknown");
 
         match phase {
-            "Running" => running += 1,
+            "Running" => {
+                // Check container-level health: a pod in "Running" phase
+                // with crash-looping or non-ready containers is not truly healthy
+                let has_unhealthy_container = status
+                    .and_then(|s| s.container_statuses.as_ref())
+                    .map(|cs| {
+                        cs.iter().any(|c| {
+                            !c.ready
+                                || c.state
+                                    .as_ref()
+                                    .map(|s| s.waiting.is_some() || s.terminated.is_some())
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if has_unhealthy_container {
+                    failed += 1;
+                } else {
+                    running += 1;
+                }
+            }
             "Pending" => pending += 1,
             "Failed" => failed += 1,
-            _ => {}
+            "Succeeded" => {} // completed pods (e.g. jobs) — don't count
+            _ => failed += 1,
         }
     }
 

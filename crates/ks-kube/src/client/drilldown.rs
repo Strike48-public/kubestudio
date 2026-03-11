@@ -2,7 +2,7 @@
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{Pod, Service};
+use k8s_openapi::api::core::v1::{Endpoints, Pod, Service};
 use ks_core::{SkdError, SkdResult};
 use kube::api::{Api, ListParams};
 
@@ -197,6 +197,15 @@ impl KubeClient {
         Ok(jobs)
     }
 
+    /// Get a single Service by name
+    pub async fn get_service(&self, name: &str, namespace: &str) -> SkdResult<Service> {
+        let api: Api<Service> = Api::namespaced(self.inner.clone(), namespace);
+        api.get(name).await.map_err(|e| SkdError::KubeApi {
+            status_code: 500,
+            message: e.to_string(),
+        })
+    }
+
     /// List pods that are endpoints for a Service
     pub async fn list_pods_for_service(
         &self,
@@ -226,8 +235,8 @@ impl KubeClient {
             .unwrap_or_default();
 
         if selector.is_empty() {
-            // Service has no selector (e.g., ExternalName service)
-            return Ok(vec![]);
+            // No selector — try the Endpoints object for pod references
+            return self.list_pods_from_endpoints(service_name, namespace).await;
         }
 
         let pod_api: Api<Pod> = Api::namespaced(self.inner.clone(), namespace);
@@ -240,6 +249,79 @@ impl KubeClient {
             })?;
 
         Ok(list.items)
+    }
+
+    /// Fetch pods referenced by an Endpoints object (for services without selectors)
+    async fn list_pods_from_endpoints(
+        &self,
+        endpoints_name: &str,
+        namespace: &str,
+    ) -> SkdResult<Vec<Pod>> {
+        let ep_api: Api<Endpoints> = Api::namespaced(self.inner.clone(), namespace);
+        let ep = match ep_api.get(endpoints_name).await {
+            Ok(ep) => ep,
+            Err(_) => return Ok(vec![]),
+        };
+
+        let subsets = ep.subsets.unwrap_or_default();
+
+        // First try: resolve pods via targetRef (direct pod references)
+        let mut pod_names: Vec<String> = Vec::new();
+        let mut endpoint_ips: Vec<String> = Vec::new();
+
+        for subset in &subsets {
+            for addr in subset.addresses.as_deref().unwrap_or_default() {
+                if let Some(tr) = &addr.target_ref
+                    && tr.kind.as_deref() == Some("Pod")
+                    && let Some(name) = &tr.name
+                {
+                    pod_names.push(name.clone());
+                }
+                // Collect IPs as fallback
+                endpoint_ips.push(addr.ip.clone());
+            }
+        }
+
+        let pod_api: Api<Pod> = Api::namespaced(self.inner.clone(), namespace);
+
+        // If we have direct pod names, fetch them
+        if !pod_names.is_empty() {
+            let mut pods = Vec::new();
+            for name in &pod_names {
+                if let Ok(pod) = pod_api.get(name).await {
+                    pods.push(pod);
+                }
+            }
+            return Ok(pods);
+        }
+
+        // Fallback: match endpoint IPs against pod IPs in the namespace
+        if !endpoint_ips.is_empty() {
+            let all_pods =
+                pod_api
+                    .list(&ListParams::default())
+                    .await
+                    .map_err(|e| SkdError::KubeApi {
+                        status_code: 500,
+                        message: e.to_string(),
+                    })?;
+
+            let pods: Vec<Pod> = all_pods
+                .items
+                .into_iter()
+                .filter(|pod| {
+                    pod.status
+                        .as_ref()
+                        .and_then(|s| s.pod_ips.as_ref())
+                        .map(|ips| ips.iter().any(|pip| endpoint_ips.contains(&pip.ip)))
+                        .unwrap_or(false)
+                })
+                .collect();
+
+            return Ok(pods);
+        }
+
+        Ok(vec![])
     }
 
     /// List pods using a PersistentVolumeClaim

@@ -89,6 +89,7 @@ pub fn ServicePodsDrillDown(mut props: ServicePodsDrillDownProps) -> Element {
     let mut pods = use_signal(Vec::<Pod>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut has_selector = use_signal(|| true);
 
     // Fetch pods for the service
     let service_name = props.service_name.clone();
@@ -104,6 +105,21 @@ pub fn ServicePodsDrillDown(mut props: ServicePodsDrillDownProps) -> Element {
             error.set(None);
 
             if let Some(ctx) = cluster {
+                // Check if the service has a selector
+                let svc_has_selector = ctx
+                    .client
+                    .get_service(&service_name, &namespace)
+                    .await
+                    .map(|svc| {
+                        svc.spec
+                            .as_ref()
+                            .and_then(|s| s.selector.as_ref())
+                            .map(|s| !s.is_empty())
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true);
+                has_selector.set(svc_has_selector);
+
                 match ctx
                     .client
                     .list_pods_for_service(&service_name, &namespace)
@@ -174,7 +190,11 @@ pub fn ServicePodsDrillDown(mut props: ServicePodsDrillDownProps) -> Element {
                 }
             } else if pod_list.is_empty() {
                 div { class: "empty-state",
-                    "No pods found backing this Service"
+                    if *has_selector.read() {
+                        "No pods found backing this Service"
+                    } else {
+                        "This service has no pod selector — traffic is managed externally"
+                    }
                 }
             } else {
                 // Pod table
