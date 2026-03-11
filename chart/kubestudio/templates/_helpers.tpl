@@ -82,3 +82,16 @@ Build KUBECONFIG env value from mounted secret keys.
 {{- join ":" $paths -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Effective ClusterRole: explicit override > yolo-derived > permissionMode-derived.
+*/}}
+{{- define "kubestudio.clusterRole" -}}
+{{- if .Values.rbac.clusterRole -}}
+{{- .Values.rbac.clusterRole -}}
+{{- else if .Values.kubestudio.yolo -}}
+cluster-admin
+{{- else -}}
+view
+{{- end -}}
+{{- end }}
