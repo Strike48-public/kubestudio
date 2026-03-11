@@ -1729,6 +1729,8 @@ enum MessageLoopResult {
     Exit,
     /// Need to reconnect with new credentials
     Reconnect(AuthContext),
+    /// Registration rejected due to invalid/untrusted JWT credentials
+    AuthFailure,
 }
 
 /// Run the connector message loop
@@ -1791,6 +1793,12 @@ async fn run_message_loop(
                     Some(Message::RegisterResponse(resp)) => {
                         if resp.success {
                             tracing::info!("Registered successfully: {}", resp.connector_arn);
+                        } else if resp.error.contains("auth_invalid")
+                            || resp.error.contains("untrusted_issuer")
+                            || resp.error.contains("jwt_invalid")
+                        {
+                            tracing::error!("Registration failed (auth): {}", resp.error);
+                            return MessageLoopResult::AuthFailure;
                         } else {
                             tracing::error!("Registration failed: {}", resp.error);
                             return MessageLoopResult::Exit;
@@ -2017,6 +2025,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Track consecutive auth failures so we can clear stale credentials
+    // and fall back to fresh OTT registration instead of looping forever.
+    let mut consecutive_auth_failures: u32 = 0;
+    const MAX_AUTH_FAILURES: u32 = 3;
+
     // Connection loop - handles reconnection after OTT auth
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -2091,13 +2104,47 @@ async fn main() -> anyhow::Result<()> {
         // Run message loop
         match run_message_loop(connector, rx, &config, &shutdown).await {
             MessageLoopResult::Reconnect(ctx) => {
+                consecutive_auth_failures = 0;
                 tracing::info!("Reconnecting with JWT authentication...");
                 auth_context = Some(ctx);
                 if sleep_with_shutdown(tokio::time::Duration::from_millis(500), &shutdown).await {
                     break;
                 }
             }
+            MessageLoopResult::AuthFailure => {
+                consecutive_auth_failures += 1;
+                if consecutive_auth_failures >= MAX_AUTH_FAILURES {
+                    tracing::warn!(
+                        "Registration rejected {} times in a row — clearing stale credentials and retrying fresh",
+                        consecutive_auth_failures,
+                    );
+                    // Remove saved credentials and keypair so the next
+                    // iteration falls through to post-approval OTT flow.
+                    let creds_path =
+                        get_credentials_path(&config.connector_type, &config.instance_id);
+                    let key_path =
+                        get_private_key_path(&config.connector_type, &config.instance_id);
+                    if creds_path.exists() {
+                        let _ = fs::remove_file(&creds_path);
+                    }
+                    if key_path.exists() {
+                        let _ = fs::remove_file(&key_path);
+                    }
+                    auth_context = None;
+                    consecutive_auth_failures = 0;
+                } else {
+                    tracing::warn!(
+                        "Auth failure {}/{}, will retry with same credentials...",
+                        consecutive_auth_failures,
+                        MAX_AUTH_FAILURES,
+                    );
+                }
+                if sleep_with_shutdown(tokio::time::Duration::from_secs(2), &shutdown).await {
+                    break;
+                }
+            }
             MessageLoopResult::Exit => {
+                consecutive_auth_failures = 0;
                 if shutdown.load(Ordering::SeqCst) {
                     break;
                 }
