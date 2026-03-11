@@ -2,7 +2,7 @@
 mode: standalone
 
 image:
-  repository: ghcr.io/strike48/kubestudio
+  repository: ghcr.io/strike48-public/kubestudio
   tag: ""  # defaults to appVersion
   pullPolicy: IfNotPresent
 
@@ -14,7 +14,11 @@ replicaCount: 1
 
 kubestudio:
   # -- Permission mode: "read" (view-only) or "write" (allow edits)
+  # Ignored when yolo=true (yolo grants cluster-admin).
   permissionMode: read
+  # -- YOLO mode: full cluster-admin access (exec, port-forward, secrets, everything).
+  # When false, runs in read-only mode: logs, CRDs, describe — no secrets, no exec, no port-forward.
+  yolo: false
   # -- Cluster display name (used when no kubeconfig is mounted).
   # Defaults to the Helm release name if empty.
   clusterName: ""
@@ -51,13 +55,21 @@ connector:
     storageClass: ""
 
 rbac:
-  # -- Create ClusterRoleBinding for the service account
+  # -- Create ClusterRoleBinding for the service account.
+  # Set to false if your pre-existing service account already has the required bindings.
   create: true
-  # -- ClusterRole to bind: view, edit, admin, or cluster-admin
-  clusterRole: view
+  # -- ClusterRole to bind. Automatically set based on yolo flag:
+  #   yolo=true  -> cluster-admin
+  #   yolo=false -> view
+  # Override this to use a custom ClusterRole.
+  clusterRole: ""
 
 serviceAccount:
+  # -- Create a service account for KubeStudio.
+  # Set to false and provide `name` to use your own pre-existing service account.
   create: true
+  # -- Name of the service account. If not set, uses the release fullname.
+  # When create=false, this MUST be set to the name of your existing service account.
   name: ""
   annotations: {}
 

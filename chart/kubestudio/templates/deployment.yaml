@@ -42,7 +42,11 @@ spec:
             - name: RUST_LOG
               value: {{ .Values.kubestudio.logLevel | quote }}
             - name: KUBESTUDIO_PERMISSION_MODE
-              value: {{ .Values.kubestudio.permissionMode | quote }}
+              value: {{ if .Values.kubestudio.yolo }}"write"{{ else }}{{ .Values.kubestudio.permissionMode | quote }}{{ end }}
+            {{- if .Values.kubestudio.yolo }}
+            - name: KUBESTUDIO_YOLO
+              value: "true"
+            {{- end }}
             - name: CLUSTER_NAME
               value: {{ .Values.kubestudio.clusterName | default .Release.Name | quote }}
             {{- if or .Values.kubeconfigs .Values.existingKubeConfigSecret }}
