@@ -1,8 +1,8 @@
 # ============================================================
 # KubeStudio — multi-arch scratch container image
 # ============================================================
-# Builds statically-linked binaries (musl) for a scratch runtime.
-# Requires rustls-only TLS (no OpenSSL/native-tls).
+# Builds statically-linked musl binaries for a scratch runtime.
+# Each target arch builds natively via QEMU (no cross-compilation).
 #
 # Usage:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -10,7 +10,7 @@
 #     -f Dockerfile.scratch --push .
 
 # ----------------------------------------------------------
-# Stage 1: cargo-chef planner
+# Stage 1: cargo-chef planner (runs on build host)
 # ----------------------------------------------------------
 FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS chef
 RUN cargo install cargo-chef --locked
@@ -21,55 +21,32 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ----------------------------------------------------------
-# Stage 2: cross-compile builder
+# Stage 2: Builder (runs natively per target arch via QEMU)
 # ----------------------------------------------------------
-FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config protobuf-compiler \
-    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-    musl-tools \
+    pkg-config protobuf-compiler musl-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Install musl cross-compiler for arm64
-RUN <<EOF
-#!/bin/bash
-set -e
-if [ "$(dpkg --print-architecture)" = "amd64" ]; then
-  apt-get update && apt-get install -y --no-install-recommends \
-    musl-dev:arm64 2>/dev/null || true
-  # Download musl cross toolchain if musl-dev:arm64 not available
-  if [ ! -f /usr/lib/aarch64-linux-musl/libc.a ]; then
-    curl -sL https://musl.cc/aarch64-linux-musl-cross.tgz | tar xz -C /opt/
-  fi
-fi
-rm -rf /var/lib/apt/lists/*
-EOF
-
-# Install musl targets
-RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+# Install the musl target for the current arch
+RUN case "$TARGETARCH" in \
+      arm64) rustup target add aarch64-unknown-linux-musl ;; \
+      *)     rustup target add x86_64-unknown-linux-musl ;; \
+    esac
 
 RUN cargo install cargo-chef --locked
 
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 
-# Determine target triple and set linker
-RUN <<EOF
-#!/bin/bash
-set -e
-case "$TARGETPLATFORM" in
-  linux/arm64) echo "aarch64-unknown-linux-musl" > /tmp/rust-target ;;
-  *)           echo "x86_64-unknown-linux-musl" > /tmp/rust-target ;;
-esac
-EOF
-
-# Cross-compilation env for arm64 musl
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc
-ENV CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc
+# Determine rust target triple
+RUN case "$TARGETARCH" in \
+      arm64) echo "aarch64-unknown-linux-musl" > /tmp/rust-target ;; \
+      *)     echo "x86_64-unknown-linux-musl" > /tmp/rust-target ;; \
+    esac
 
 # Pre-cache dependencies
 RUN RUST_TARGET=$(cat /tmp/rust-target) && \
@@ -89,18 +66,14 @@ RUN RUST_TARGET=$(cat /tmp/rust-target) && \
     cp target/"$(cat /tmp/rust-target)"/release/ks-connector /out/
 
 # ----------------------------------------------------------
-# Stage 3: Scratch runtime — zero OS, just the binaries
+# Stage 3: Scratch — zero OS, just the static binaries
 # ----------------------------------------------------------
 FROM scratch
 
-# CA certificates for TLS
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-# Static binaries
 COPY --from=builder /out/ks-server /usr/local/bin/ks-server
 COPY --from=builder /out/ks-connector /usr/local/bin/ks-connector
 
-# Non-root user (numeric, since scratch has no /etc/passwd)
 USER 999:999
 
 ENV PORT=8080
