@@ -8,7 +8,6 @@ pub use helpers::format_age;
 pub use hotkeys::{get_commands, get_commands_with_tools, get_hotkeys};
 pub use resource_items::*;
 
-use crate::utils::is_escape;
 use crate::components::{
     ActionConfirmModal, ActionTarget, ActionType, ApplyManifest, ApplySource, ChatPanel,
     ClusterOverview, CommandPalette, ContainerDrillDown, Context, CreateResource,
@@ -27,6 +26,7 @@ use crate::hooks::{
     use_watch_rolebindings, use_watch_roles, use_watch_secrets, use_watch_services,
     use_watch_statefulsets, use_watch_storageclasses,
 };
+use crate::utils::is_escape;
 use dioxus::prelude::*;
 use ks_kube::CrdInfo;
 use ks_kube::PermissionMode;
