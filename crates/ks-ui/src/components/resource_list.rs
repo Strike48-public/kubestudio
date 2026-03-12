@@ -187,24 +187,25 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
                                 return;
                             }
 
-                            match e.key() {
-                                Key::Escape => {
-                                    search.set(String::new());
-                                    let _ = document::eval("document.querySelector('.search-input').value = ''");
-                                    props.search_focused.set(false);
-                                    update_selection(None);
+                            if crate::utils::is_escape(&e) {
+                                search.set(String::new());
+                                let _ = document::eval("document.querySelector('.search-input').value = ''");
+                                props.search_focused.set(false);
+                                update_selection(None);
 
-                                    // Refocus the app container so hotkeys continue to work
-                                    if let Some(app_container_signal) = &props.app_container_ref
-                                        && let Some(app_ref) = app_container_signal.read().clone() {
-                                        spawn(async move {
-                                            let _ = app_ref.set_focus(true).await;
-                                        });
-                                    }
-
-                                    e.prevent_default();
-                                    e.stop_propagation();
+                                // Refocus the app container so hotkeys continue to work
+                                if let Some(app_container_signal) = &props.app_container_ref
+                                    && let Some(app_ref) = app_container_signal.read().clone() {
+                                    spawn(async move {
+                                        let _ = app_ref.set_focus(true).await;
+                                    });
                                 }
+
+                                e.prevent_default();
+                                e.stop_propagation();
+                                return;
+                            }
+                            match e.key() {
                                 Key::Enter => {
                                     // Apply filter and blur - don't select resource
                                     props.search_focused.set(false);

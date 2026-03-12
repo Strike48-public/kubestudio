@@ -446,7 +446,7 @@ pub fn ExecViewer(props: ExecViewerProps) -> Element {
                         },
                         onkeydown: move |e: KeyboardEvent| {
                             // Handle escape to go back
-                            if e.key() == Key::Escape {
+                            if crate::utils::is_escape(&e) {
                                 on_back_key.call(());
                                 e.stop_propagation();
                                 e.prevent_default();

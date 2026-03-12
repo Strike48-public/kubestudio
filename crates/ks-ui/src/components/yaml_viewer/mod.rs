@@ -278,138 +278,134 @@ pub fn YamlViewer(props: YamlViewerProps) -> Element {
                         return;
                     }
 
-                    match e.key() {
-                        Key::Character(ref c) if !e.modifiers().ctrl() && !e.modifiers().meta() => {
-                            // Skip most shortcuts in edit mode (let textarea handle them)
-                            if *edit_mode.read() {
-                                e.stop_propagation();
-                                return;
-                            }
-                            match c.as_str() {
-                                "e" => {
-                                    // Enter edit mode - switch to YAML view
-                                    if props.read_only {
-                                        tracing::warn!("Edit disabled in read-only mode (KUBESTUDIO_MODE=read)");
-                                    } else if !*edit_mode.read() {
-                                        view_mode.set("yaml".to_string());
-                                        // Get clean YAML without managed fields for editing
-                                        let yaml_for_edit = strip_managed_fields(&content_full.read());
-                                        edited_content.set(yaml_for_edit.clone());
-                                        content.set(yaml_for_edit);
-                                        edit_mode.set(true);
-                                        apply_state.set(ApplyState::Idle);
+                    if crate::utils::is_escape(&e) {
+                        if *edit_mode.read() {
+                            // Cancel edit mode - stay in YAML view
+                            edit_mode.set(false);
+                            apply_state.set(ApplyState::Idle);
+                            // Keep YAML view, restore content without managed fields
+                            view_mode.set("yaml".to_string());
+                            let stripped = strip_managed_fields(&content_full.read());
+                            content.set(stripped);
+                            // Trigger refocus on content
+                            should_refocus_content.set(true);
+                        } else if matches!(*apply_state.read(), ApplyState::Confirming) {
+                            // Cancel confirmation - go back to edit mode
+                            apply_state.set(ApplyState::Idle);
+                        } else {
+                            on_back_key.call(());
+                        }
+                        e.stop_propagation();
+                    } else {
+                        match e.key() {
+                            Key::Character(ref c) if !e.modifiers().ctrl() && !e.modifiers().meta() => {
+                                if *edit_mode.read() {
+                                    e.stop_propagation();
+                                    return;
+                                }
+                                match c.as_str() {
+                                    "e" => {
+                                        if props.read_only {
+                                            tracing::warn!("Edit disabled in read-only mode (KUBESTUDIO_MODE=read)");
+                                        } else if !*edit_mode.read() {
+                                            view_mode.set("yaml".to_string());
+                                            let yaml_for_edit = strip_managed_fields(&content_full.read());
+                                            edited_content.set(yaml_for_edit.clone());
+                                            content.set(yaml_for_edit);
+                                            edit_mode.set(true);
+                                            apply_state.set(ApplyState::Idle);
+                                        }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                "w" => {
-                                    let new_wrap = !*text_wrap.read();
-                                    text_wrap.set(new_wrap);
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                "c" => {
-                                    #[cfg(feature = "desktop")]
-                                    {
-                                        let current_content = content.read().clone();
-                                        if !current_content.is_empty() {
-                                            spawn(async move {
-                                                match arboard::Clipboard::new() {
-                                                    Ok(mut clipboard) => {
-                                                        if clipboard.set_text(&current_content).is_ok() {
-                                                            copied.set(true);
-                                                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                                            copied.set(false);
+                                    "w" => {
+                                        let new_wrap = !*text_wrap.read();
+                                        text_wrap.set(new_wrap);
+                                        e.stop_propagation();
+                                        e.prevent_default();
+                                    }
+                                    "c" => {
+                                        #[cfg(feature = "desktop")]
+                                        {
+                                            let current_content = content.read().clone();
+                                            if !current_content.is_empty() {
+                                                spawn(async move {
+                                                    match arboard::Clipboard::new() {
+                                                        Ok(mut clipboard) => {
+                                                            if clipboard.set_text(&current_content).is_ok() {
+                                                                copied.set(true);
+                                                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                                                copied.set(false);
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::error!("Failed to access clipboard: {}", e);
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        tracing::error!("Failed to access clipboard: {}", e);
-                                                    }
-                                                }
-                                            });
+                                                });
+                                            }
                                         }
+                                        #[cfg(not(feature = "desktop"))]
+                                        {
+                                            tracing::debug!("Clipboard copy not available in web mode");
+                                        }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
-                                    #[cfg(not(feature = "desktop"))]
-                                    {
-                                        // Clipboard not available in web/fullstack mode
-                                        tracing::debug!("Clipboard copy not available in web mode");
+                                    "m" => {
+                                        let show = !show_managed_fields();
+                                        show_managed_fields.set(show);
+                                        if view_mode.read().as_str() == "yaml" {
+                                            if show {
+                                                content.set(content_full.read().clone());
+                                            } else {
+                                                let stripped = strip_managed_fields(&content_full.read());
+                                                content.set(stripped);
+                                            }
+                                        }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                "m" => {
-                                    let show = !show_managed_fields();
-                                    show_managed_fields.set(show);
-                                    if view_mode.read().as_str() == "yaml" {
-                                        if show {
-                                            content.set(content_full.read().clone());
+                                    "h" => {
+                                        let current_mode = view_mode.read().clone();
+                                        if current_mode == "yaml" {
+                                            view_mode.set("describe".to_string());
+                                            let full_yaml = content_full.read().clone();
+                                            let describe_text = yaml_to_describe_format(&full_yaml);
+                                            content.set(describe_text);
                                         } else {
-                                            let stripped = strip_managed_fields(&content_full.read());
-                                            content.set(stripped);
+                                            view_mode.set("yaml".to_string());
+                                            if show_managed_fields() {
+                                                content.set(content_full.read().clone());
+                                            } else {
+                                                let stripped = strip_managed_fields(&content_full.read());
+                                                content.set(stripped);
+                                            }
                                         }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                "h" => {
-                                    let current_mode = view_mode.read().clone();
-                                    if current_mode == "yaml" {
-                                        view_mode.set("describe".to_string());
-                                        let full_yaml = content_full.read().clone();
-                                        let describe_text = yaml_to_describe_format(&full_yaml);
-                                        content.set(describe_text);
-                                    } else {
-                                        view_mode.set("yaml".to_string());
-                                        if show_managed_fields() {
-                                            content.set(content_full.read().clone());
-                                        } else {
-                                            let stripped = strip_managed_fields(&content_full.read());
-                                            content.set(stripped);
+                                    "r" => {
+                                        if is_secret {
+                                            let new_revealed = !*secrets_revealed.read();
+                                            secrets_revealed.set(new_revealed);
                                         }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                "r" => {
-                                    // Toggle secret value reveal (only for Secrets)
-                                    if is_secret {
-                                        let new_revealed = !*secrets_revealed.read();
-                                        secrets_revealed.set(new_revealed);
+                                    _ => {
+                                        e.stop_propagation();
                                     }
-                                    e.stop_propagation();
-                                    e.prevent_default();
-                                }
-                                _ => {
-                                    e.stop_propagation();
                                 }
                             }
-                        }
-                        Key::Escape => {
-                            if *edit_mode.read() {
-                                // Cancel edit mode - stay in YAML view
-                                edit_mode.set(false);
-                                apply_state.set(ApplyState::Idle);
-                                // Keep YAML view, restore content without managed fields
-                                view_mode.set("yaml".to_string());
-                                let stripped = strip_managed_fields(&content_full.read());
-                                content.set(stripped);
-                                // Trigger refocus on content
-                                should_refocus_content.set(true);
-                            } else if matches!(*apply_state.read(), ApplyState::Confirming) {
-                                // Cancel confirmation - go back to edit mode
-                                apply_state.set(ApplyState::Idle);
-                            } else {
-                                on_back_key.call(());
+                            Key::ArrowLeft | Key::ArrowRight => {
+                                e.stop_propagation();
                             }
-                            e.stop_propagation();
+                            Key::ArrowDown | Key::ArrowUp | Key::PageDown | Key::PageUp | Key::Home | Key::End => {
+                                e.stop_propagation();
+                            }
+                            _ => {}
                         }
-                        Key::ArrowLeft | Key::ArrowRight => {
-                            e.stop_propagation();
-                        }
-                        Key::ArrowDown | Key::ArrowUp | Key::PageDown | Key::PageUp | Key::Home | Key::End => {
-                            e.stop_propagation();
-                        }
-                        _ => {}
                     }
                 },
                 if loading() {
@@ -492,20 +488,19 @@ pub fn YamlViewer(props: YamlViewerProps) -> Element {
                         });
                     },
                     onkeydown: move |e: KeyboardEvent| {
-                        match e.key() {
-                            Key::Escape => {
-                                apply_state.set(ApplyState::Idle);
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::Tab | Key::ArrowLeft | Key::ArrowRight => {
-                                // Toggle selection
-                                let current = *modal_selected.read();
-                                modal_selected.set(if current == 0 { 1 } else { 0 });
-                                e.stop_propagation();
-                                e.prevent_default();
-                            }
-                            Key::Enter => {
+                        if crate::utils::is_escape(&e) {
+                            apply_state.set(ApplyState::Idle);
+                            e.stop_propagation();
+                            e.prevent_default();
+                        } else {
+                            match e.key() {
+                                Key::Tab | Key::ArrowLeft | Key::ArrowRight => {
+                                    let current = *modal_selected.read();
+                                    modal_selected.set(if current == 0 { 1 } else { 0 });
+                                    e.stop_propagation();
+                                    e.prevent_default();
+                                }
+                                Key::Enter => {
                                 let selected = *modal_selected.read();
                                 if selected == 0 {
                                     // Cancel
@@ -542,9 +537,10 @@ pub fn YamlViewer(props: YamlViewerProps) -> Element {
                                 e.stop_propagation();
                                 e.prevent_default();
                             }
-                            _ => {
-                                e.stop_propagation();
-                                e.prevent_default();
+                                _ => {
+                                    e.stop_propagation();
+                                    e.prevent_default();
+                                }
                             }
                         }
                     },

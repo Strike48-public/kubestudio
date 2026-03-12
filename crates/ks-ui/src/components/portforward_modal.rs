@@ -51,83 +51,80 @@ pub fn PortForwardModal(props: PortForwardModalProps) -> Element {
             onkeydown: {
                 let container_ports = props.container_ports.clone();
                 move |e: KeyboardEvent| {
-                    match e.key() {
-                        Key::Escape => {
-                            on_cancel.call(());
-                            e.stop_propagation();
-                            e.prevent_default();
-                        }
-                        Key::Enter => {
-                            // Submit the form
-                            let local_port_str = local_port_input.read().clone();
-                            match local_port_str.parse::<u16>() {
-                                Ok(local_port) => {
-                                    if local_port == 0 {
-                                        error_message.set(Some("Port must be greater than 0".to_string()));
-                                    } else {
-                                        let remote_port = if container_ports.is_empty() {
-                                            local_port
+                    if crate::utils::is_escape(&e) {
+                        on_cancel.call(());
+                        e.stop_propagation();
+                        e.prevent_default();
+                    } else {
+                        match e.key() {
+                            Key::Enter => {
+                                let local_port_str = local_port_input.read().clone();
+                                match local_port_str.parse::<u16>() {
+                                    Ok(local_port) => {
+                                        if local_port == 0 {
+                                            error_message.set(Some("Port must be greater than 0".to_string()));
                                         } else {
-                                            container_ports.get(*selected_port_index.read()).map(|(p, _, _)| *p).unwrap_or(local_port)
-                                        };
-                                        on_confirm.call((local_port, remote_port));
+                                            let remote_port = if container_ports.is_empty() {
+                                                local_port
+                                            } else {
+                                                container_ports.get(*selected_port_index.read()).map(|(p, _, _)| *p).unwrap_or(local_port)
+                                            };
+                                            on_confirm.call((local_port, remote_port));
+                                        }
                                     }
-                                }
-                                Err(_) => {
-                                    error_message.set(Some("Invalid port number".to_string()));
-                                }
-                            }
-                            e.stop_propagation();
-                            e.prevent_default();
-                        }
-                        Key::ArrowUp => {
-                            let current_focus = *focus_zone.read();
-                            if current_focus == ModalFocus::PortList && port_count > 0 {
-                                let current = *selected_port_index.read();
-                                if current > 0 {
-                                    selected_port_index.set(current - 1);
-                                    if let Some((p, _, _)) = container_ports.get(current - 1) {
-                                        local_port_input.set(p.to_string());
+                                    Err(_) => {
+                                        error_message.set(Some("Invalid port number".to_string()));
                                     }
                                 }
                                 e.stop_propagation();
                                 e.prevent_default();
-                            } else if current_focus == ModalFocus::LocalPort && port_count > 0 {
-                                // Move to port list
-                                focus_zone.set(ModalFocus::PortList);
-                                e.stop_propagation();
-                                e.prevent_default();
                             }
-                        }
-                        Key::ArrowDown => {
-                            let current_focus = *focus_zone.read();
-                            if current_focus == ModalFocus::PortList && port_count > 0 {
-                                let current = *selected_port_index.read();
-                                if current < port_count - 1 {
-                                    selected_port_index.set(current + 1);
-                                    if let Some((p, _, _)) = container_ports.get(current + 1) {
-                                        local_port_input.set(p.to_string());
+                            Key::ArrowUp => {
+                                let current_focus = *focus_zone.read();
+                                if current_focus == ModalFocus::PortList && port_count > 0 {
+                                    let current = *selected_port_index.read();
+                                    if current > 0 {
+                                        selected_port_index.set(current - 1);
+                                        if let Some((p, _, _)) = container_ports.get(current - 1) {
+                                            local_port_input.set(p.to_string());
+                                        }
                                     }
+                                    e.stop_propagation();
+                                    e.prevent_default();
+                                } else if current_focus == ModalFocus::LocalPort && port_count > 0 {
+                                    focus_zone.set(ModalFocus::PortList);
+                                    e.stop_propagation();
+                                    e.prevent_default();
+                                }
+                            }
+                            Key::ArrowDown => {
+                                let current_focus = *focus_zone.read();
+                                if current_focus == ModalFocus::PortList && port_count > 0 {
+                                    let current = *selected_port_index.read();
+                                    if current < port_count - 1 {
+                                        selected_port_index.set(current + 1);
+                                        if let Some((p, _, _)) = container_ports.get(current + 1) {
+                                            local_port_input.set(p.to_string());
+                                        }
+                                    } else {
+                                        focus_zone.set(ModalFocus::LocalPort);
+                                    }
+                                    e.stop_propagation();
+                                    e.prevent_default();
+                                }
+                            }
+                            Key::Tab => {
+                                let current = *focus_zone.read();
+                                if current == ModalFocus::LocalPort && port_count > 0 {
+                                    focus_zone.set(ModalFocus::PortList);
                                 } else {
-                                    // At end of list, move to local port input
                                     focus_zone.set(ModalFocus::LocalPort);
                                 }
                                 e.stop_propagation();
                                 e.prevent_default();
                             }
+                            _ => {}
                         }
-                        Key::Tab => {
-                            // Toggle between port list and local port input
-                            let current = *focus_zone.read();
-                            if current == ModalFocus::LocalPort && port_count > 0 {
-                                focus_zone.set(ModalFocus::PortList);
-                            } else {
-                                focus_zone.set(ModalFocus::LocalPort);
-                            }
-                            e.stop_propagation();
-                            e.prevent_default();
-                        }
-                        _ => {}
                     }
                 }
             },

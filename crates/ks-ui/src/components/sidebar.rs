@@ -556,6 +556,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                                     let key = match &e.key() {
                                         Key::Character(c) if c == "j" => Key::ArrowDown,
                                         Key::Character(c) if c == "k" => Key::ArrowUp,
+                                        Key::Character(c) if c == "[" && e.modifiers().ctrl() => Key::Escape,
                                         other => other.clone(),
                                     };
 

@@ -26,6 +26,7 @@ use crate::hooks::{
     use_watch_rolebindings, use_watch_roles, use_watch_secrets, use_watch_services,
     use_watch_statefulsets, use_watch_storageclasses,
 };
+use crate::utils::is_escape;
 use dioxus::prelude::*;
 use ks_kube::CrdInfo;
 use ks_kube::PermissionMode;
@@ -410,10 +411,11 @@ pub fn App() -> Element {
     let onkeydown = move |e: KeyboardEvent| {
         let is_focused = search_is_focused();
 
-        // Map vim j/k to arrow keys for navigation
+        // Map vim j/k to arrow keys, Ctrl+[ to Escape (VT100)
         let effective_key = match &e.key() {
             Key::Character(c) if c == "j" => Key::ArrowDown,
             Key::Character(c) if c == "k" => Key::ArrowUp,
+            Key::Character(c) if c == "[" && e.modifiers().ctrl() => Key::Escape,
             other => other.clone(),
         };
 
@@ -427,7 +429,7 @@ pub fn App() -> Element {
         }
 
         // Special handling for Escape key when search is focused
-        if e.key() == Key::Escape && is_focused {
+        if effective_key == Key::Escape && is_focused {
             search_is_focused.set(false);
             e.stop_propagation();
             return;
@@ -441,7 +443,7 @@ pub fn App() -> Element {
 
         // Handle namespace selector escape
         if namespace_selector_focused() {
-            if e.key() == Key::Escape {
+            if effective_key == Key::Escape {
                 namespace_selector_focused.set(false);
                 if let Some(app_ref) = app_container_ref.read().clone() {
                     spawn(async move {
@@ -454,7 +456,7 @@ pub fn App() -> Element {
         }
 
         if command_palette_open() {
-            if e.key() == Key::Escape {
+            if effective_key == Key::Escape {
                 command_palette_open.set(false);
                 e.stop_propagation();
             }
@@ -463,7 +465,7 @@ pub fn App() -> Element {
 
         // Handle command mode (k9s-style ":" commands for aliases)
         if command_mode_open() {
-            match e.key() {
+            match effective_key {
                 Key::Escape => {
                     command_mode_open.set(false);
                     command_input.set(String::new());
@@ -3164,55 +3166,51 @@ pub fn App() -> Element {
                                     command_input.set(e.value().clone());
                                 },
                                 onkeydown: move |e: KeyboardEvent| {
-                                    match e.key() {
-                                        Key::Escape => {
-                                            command_mode_open.set(false);
-                                            command_input.set(String::new());
-                                            if let Some(app_ref) = app_container_ref.read().clone() {
-                                                spawn(async move {
-                                                    let _ = app_ref.set_focus(true).await;
-                                                });
-                                            }
-                                            e.stop_propagation();
-                                            e.prevent_default();
+                                    if is_escape(&e) {
+                                        command_mode_open.set(false);
+                                        command_input.set(String::new());
+                                        if let Some(app_ref) = app_container_ref.read().clone() {
+                                            spawn(async move {
+                                                let _ = app_ref.set_focus(true).await;
+                                            });
                                         }
-                                        Key::Enter => {
-                                            let cmd = command_input.read().clone();
-                                            command_mode_open.set(false);
-                                            command_input.set(String::new());
+                                        e.stop_propagation();
+                                        e.prevent_default();
+                                    } else if e.key() == Key::Enter {
+                                        let cmd = command_input.read().clone();
+                                        command_mode_open.set(false);
+                                        command_input.set(String::new());
 
-                                            let resolved = plugin_config.read().resolve_alias(&cmd).cloned();
-                                            let target = resolved.unwrap_or_else(|| cmd.clone());
-                                            let sidebar_items = get_all_sidebar_items_with_crds(&crd_state.read().crds);
+                                        let resolved = plugin_config.read().resolve_alias(&cmd).cloned();
+                                        let target = resolved.unwrap_or_else(|| cmd.clone());
+                                        let sidebar_items = get_all_sidebar_items_with_crds(&crd_state.read().crds);
 
-                                            if let Some(idx) = sidebar_items.iter().position(|k| k == &target) {
-                                                tracing::info!("Command mode: navigating to '{}' (index {})", target, idx);
-                                                previous_view.set(current_view.read().clone());
-                                                current_view.set(target.clone());
-                                                nav.write().reset(ViewState::ResourceList);
-                                                selected_index.set(None);
-                                                selected_resource.set(None);
-                                                sidebar_selected_index.set(Some(idx));
+                                        if let Some(idx) = sidebar_items.iter().position(|k| k == &target) {
+                                            tracing::info!("Command mode: navigating to '{}' (index {})", target, idx);
+                                            previous_view.set(current_view.read().clone());
+                                            current_view.set(target.clone());
+                                            nav.write().reset(ViewState::ResourceList);
+                                            selected_index.set(None);
+                                            selected_resource.set(None);
+                                            sidebar_selected_index.set(Some(idx));
 
-                                                if let Some(crd_name) = target.strip_prefix("crd:") {
-                                                    let crd = crd_state.read().crds.iter()
-                                                        .find(|c| c.name == crd_name)
-                                                        .cloned();
-                                                    selected_crd.set(crd);
-                                                } else {
-                                                    selected_crd.set(None);
-                                                }
+                                            if let Some(crd_name) = target.strip_prefix("crd:") {
+                                                let crd = crd_state.read().crds.iter()
+                                                    .find(|c| c.name == crd_name)
+                                                    .cloned();
+                                                selected_crd.set(crd);
+                                            } else {
+                                                selected_crd.set(None);
                                             }
-
-                                            if let Some(app_ref) = app_container_ref.read().clone() {
-                                                spawn(async move {
-                                                    let _ = app_ref.set_focus(true).await;
-                                                });
-                                            }
-                                            e.stop_propagation();
-                                            e.prevent_default();
                                         }
-                                        _ => {}
+
+                                        if let Some(app_ref) = app_container_ref.read().clone() {
+                                            spawn(async move {
+                                                let _ = app_ref.set_focus(true).await;
+                                            });
+                                        }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
                                 },
                             }
@@ -3651,7 +3649,7 @@ pub fn App() -> Element {
                         });
                     },
                     onkeydown: move |e: KeyboardEvent| {
-                        if e.key() == Key::Escape {
+                        if is_escape(&e) {
                             help_modal_open.set(false);
                             // Refocus app container so hotkeys work
                             if let Some(app_ref) = app_container_ref.read().clone() {

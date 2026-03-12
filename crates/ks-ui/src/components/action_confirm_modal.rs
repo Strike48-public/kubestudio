@@ -76,30 +76,33 @@ pub fn ActionConfirmModal(props: ActionConfirmModalProps) -> Element {
     };
 
     let target_for_confirm = target.clone();
-    let onkeydown = move |e: KeyboardEvent| match e.key() {
-        Key::Escape => {
+    let onkeydown = move |e: KeyboardEvent| {
+        if crate::utils::is_escape(&e) {
             props.on_cancel.call(());
             e.stop_propagation();
-        }
-        Key::Enter => {
-            if let Some(true) = *selected_option.read() {
-                props.on_confirm.call(target_for_confirm.clone());
-            } else if let Some(false) = *selected_option.read() {
-                props.on_cancel.call(());
+        } else {
+            match e.key() {
+                Key::Enter => {
+                    if let Some(true) = *selected_option.read() {
+                        props.on_confirm.call(target_for_confirm.clone());
+                    } else if let Some(false) = *selected_option.read() {
+                        props.on_cancel.call(());
+                    }
+                    e.stop_propagation();
+                }
+                Key::ArrowLeft | Key::ArrowRight | Key::Tab => {
+                    let current = *selected_option.read();
+                    match current {
+                        None => selected_option.set(Some(false)),
+                        Some(true) => selected_option.set(Some(false)),
+                        Some(false) => selected_option.set(Some(true)),
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
+                }
+                _ => {}
             }
-            e.stop_propagation();
         }
-        Key::ArrowLeft | Key::ArrowRight | Key::Tab => {
-            let current = *selected_option.read();
-            match current {
-                None => selected_option.set(Some(false)),
-                Some(true) => selected_option.set(Some(false)),
-                Some(false) => selected_option.set(Some(true)),
-            }
-            e.stop_propagation();
-            e.prevent_default();
-        }
-        _ => {}
     };
 
     let action_type = props.action_type.clone();
