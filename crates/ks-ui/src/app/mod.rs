@@ -3176,46 +3176,41 @@ pub fn App() -> Element {
                                         }
                                         e.stop_propagation();
                                         e.prevent_default();
-                                    } else {
-                                        match e.key() {
-                                            Key::Enter => {
-                                                let cmd = command_input.read().clone();
-                                                command_mode_open.set(false);
-                                                command_input.set(String::new());
+                                    } else if e.key() == Key::Enter {
+                                        let cmd = command_input.read().clone();
+                                        command_mode_open.set(false);
+                                        command_input.set(String::new());
 
-                                                let resolved = plugin_config.read().resolve_alias(&cmd).cloned();
-                                                let target = resolved.unwrap_or_else(|| cmd.clone());
-                                                let sidebar_items = get_all_sidebar_items_with_crds(&crd_state.read().crds);
+                                        let resolved = plugin_config.read().resolve_alias(&cmd).cloned();
+                                        let target = resolved.unwrap_or_else(|| cmd.clone());
+                                        let sidebar_items = get_all_sidebar_items_with_crds(&crd_state.read().crds);
 
-                                                if let Some(idx) = sidebar_items.iter().position(|k| k == &target) {
-                                                    tracing::info!("Command mode: navigating to '{}' (index {})", target, idx);
-                                                    previous_view.set(current_view.read().clone());
-                                                    current_view.set(target.clone());
-                                                    nav.write().reset(ViewState::ResourceList);
-                                                    selected_index.set(None);
-                                                    selected_resource.set(None);
-                                                    sidebar_selected_index.set(Some(idx));
+                                        if let Some(idx) = sidebar_items.iter().position(|k| k == &target) {
+                                            tracing::info!("Command mode: navigating to '{}' (index {})", target, idx);
+                                            previous_view.set(current_view.read().clone());
+                                            current_view.set(target.clone());
+                                            nav.write().reset(ViewState::ResourceList);
+                                            selected_index.set(None);
+                                            selected_resource.set(None);
+                                            sidebar_selected_index.set(Some(idx));
 
-                                                    if let Some(crd_name) = target.strip_prefix("crd:") {
-                                                        let crd = crd_state.read().crds.iter()
-                                                            .find(|c| c.name == crd_name)
-                                                            .cloned();
-                                                        selected_crd.set(crd);
-                                                    } else {
-                                                        selected_crd.set(None);
-                                                    }
-                                                }
-
-                                                if let Some(app_ref) = app_container_ref.read().clone() {
-                                                    spawn(async move {
-                                                        let _ = app_ref.set_focus(true).await;
-                                                    });
-                                                }
-                                                e.stop_propagation();
-                                                e.prevent_default();
+                                            if let Some(crd_name) = target.strip_prefix("crd:") {
+                                                let crd = crd_state.read().crds.iter()
+                                                    .find(|c| c.name == crd_name)
+                                                    .cloned();
+                                                selected_crd.set(crd);
+                                            } else {
+                                                selected_crd.set(None);
                                             }
-                                            _ => {}
                                         }
+
+                                        if let Some(app_ref) = app_container_ref.read().clone() {
+                                            spawn(async move {
+                                                let _ = app_ref.set_focus(true).await;
+                                            });
+                                        }
+                                        e.stop_propagation();
+                                        e.prevent_default();
                                     }
                                 },
                             }
