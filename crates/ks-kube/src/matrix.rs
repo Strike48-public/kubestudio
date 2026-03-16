@@ -171,9 +171,16 @@ pub struct MatrixChatClient {
 
 impl MatrixChatClient {
     pub fn new(api_url: impl Into<String>) -> Self {
+        let tls_insecure = std::env::var("MATRIX_TLS_INSECURE")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(tls_insecure)
+            .build()
+            .expect("failed to build HTTP client");
         Self {
             api_url: api_url.into(),
-            client: reqwest::Client::new(),
+            client,
             auth_token: None,
         }
     }

@@ -36,7 +36,7 @@ pub fn get_commands_with_tools(config: &PluginConfig) -> Vec<Command> {
     for tool in &config.tools {
         commands.push(Command {
             id: format!("tool:{}", tool.name),
-            label: format!("🔧 Launch {}", tool.name),
+            label: format!("Launch {}", tool.name),
             shortcut: None,
         });
     }

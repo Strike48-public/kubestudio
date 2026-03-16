@@ -37,16 +37,22 @@ impl PluginConfig {
     /// If a config file exists, merges it with defaults (user config takes priority).
     pub fn load() -> Result<Self, PluginError> {
         let config_path = Self::config_path().ok_or(PluginError::ConfigDirNotFound)?;
+        Self::load_from_path(&config_path)
+    }
 
-        if !config_path.exists() {
+    /// Load configuration from a specific file path.
+    /// If the file doesn't exist, returns built-in defaults.
+    /// If it exists, parses it and merges with defaults (user config takes priority).
+    pub fn load_from_path(path: &std::path::Path) -> Result<Self, PluginError> {
+        if !path.exists() {
             tracing::debug!(
                 "No config file found at {:?}, using built-in defaults",
-                config_path
+                path
             );
             return Ok(Self::with_defaults());
         }
 
-        let content = std::fs::read_to_string(&config_path)?;
+        let content = std::fs::read_to_string(path)?;
         let user_config: PluginConfig = serde_yaml::from_str(&content)?;
 
         // Start with defaults and merge user config on top
@@ -69,7 +75,7 @@ impl PluginConfig {
             }
         }
 
-        tracing::info!("Loaded plugin config from {:?}", config_path);
+        tracing::info!("Loaded plugin config from {:?}", path);
         Ok(config)
     }
 
@@ -129,38 +135,26 @@ impl PluginConfig {
             hotkeys: Vec::new(),
             tools: vec![
                 ExternalTool {
-                    name: "k9s".to_string(),
-                    command: "k9s".to_string(),
+                    name: "echo-test".to_string(),
+                    command: "echo".to_string(),
                     args: vec![
-                        "--context".to_string(),
-                        "{{context}}".to_string(),
-                        "--namespace".to_string(),
-                        "{{namespace}}".to_string(),
+                        "Plugin test: namespace={{namespace}} name={{name}} kind={{kind}} context={{context}}".to_string(),
                     ],
-                    description: Some("Open k9s terminal UI".to_string()),
+                    description: Some("Test plugin pipeline (no external tools needed)".to_string()),
                 },
                 ExternalTool {
-                    name: "stern".to_string(),
-                    command: "stern".to_string(),
-                    args: vec![
-                        "{{name}}".to_string(),
-                        "--namespace".to_string(),
-                        "{{namespace}}".to_string(),
-                        "--context".to_string(),
-                        "{{context}}".to_string(),
-                    ],
-                    description: Some("Tail logs with stern".to_string()),
-                },
-                ExternalTool {
-                    name: "kubectl".to_string(),
+                    name: "kubectl-get".to_string(),
                     command: "kubectl".to_string(),
                     args: vec![
+                        "get".to_string(),
+                        "{{kind}}".to_string(),
+                        "{{name}}".to_string(),
                         "--context".to_string(),
                         "{{context}}".to_string(),
                         "--namespace".to_string(),
                         "{{namespace}}".to_string(),
                     ],
-                    description: Some("Run kubectl commands".to_string()),
+                    description: Some("kubectl get for selected resource".to_string()),
                 },
             ],
         }
@@ -231,9 +225,14 @@ pub struct ExternalTool {
 }
 
 impl ExternalTool {
-    /// Expand the arguments with the given context
+    /// Expand the arguments with the given context.
+    ///
+    /// Template variables that resolve to None/empty are handled:
+    /// - A standalone arg that expands to empty is dropped
+    /// - A `--flag value` pair where the value is empty drops both args
     pub fn expand_args(&self, ctx: &TemplateContext) -> Vec<String> {
-        self.args
+        let expanded: Vec<String> = self
+            .args
             .iter()
             .map(|arg| {
                 let mut a = arg.clone();
@@ -243,7 +242,39 @@ impl ExternalTool {
                 a = a.replace("{{context}}", &ctx.context.clone().unwrap_or_default());
                 a
             })
-            .collect()
+            .collect();
+
+        // Filter out empty args and their preceding flags.
+        // e.g., ["--namespace", ""] → dropped entirely.
+        let mut result = Vec::with_capacity(expanded.len());
+        let mut skip_next = false;
+        for (i, arg) in expanded.iter().enumerate() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg.is_empty() {
+                // Remove the preceding flag if it was a --flag
+                if result
+                    .last()
+                    .map(|s: &String| s.starts_with('-'))
+                    .unwrap_or(false)
+                {
+                    result.pop();
+                }
+                continue;
+            }
+            // If this is a flag and the next arg is empty, skip both
+            if arg.starts_with('-')
+                && let Some(next) = expanded.get(i + 1)
+                && next.is_empty()
+            {
+                skip_next = true;
+                continue;
+            }
+            result.push(arg.clone());
+        }
+        result
     }
 }
 
