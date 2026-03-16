@@ -91,8 +91,8 @@ cargo run --features connector --no-default-features --bin ks-connector
 | `STRIKE48_URL` | Strike48 Prospector Studio gRPC endpoint |
 | `STRIKE48_API_URL` | Strike48 Prospector Studio API base URL |
 | `TENANT_ID` | Tenant identifier |
-| `INSTANCE_ID` | Connector instance name |
-| `CONNECTOR_NAME` | Override gateway identity (default: `app-kube-studio`). Set a unique value per connector to get separate sidebar entries instead of round-robin |
+| `INSTANCE_ID` | Connector instance name (must be unique per deployment) |
+| `CONNECTOR_NAME` | Gateway identity and sidebar display label. When set, the connector gets its own gateway and appears as `KubeStudio > CONNECTOR_NAME > cluster` in the sidebar. When omitted, instances share the default gateway and round-robin (SDK default) |
 | `MATRIX_TLS_INSECURE` | Skip TLS verification (dev only) |
 
 ### Docker
@@ -147,6 +147,13 @@ helm install kubestudio chart/kubestudio \
   --set connector.tenantId=your-tenant \
   --set connector.instanceId=kubestudio \
   --set rbac.clusterRole=cluster-admin
+
+# To scale with round-robin, set the same connectorName across replicas:
+helm install kubestudio chart/kubestudio \
+  --set mode=ai-enabled \
+  --set connector.connectorName=my-shared-kube \
+  --set replicaCount=3 \
+  ...
 ```
 
 See `chart/kubestudio/values.yaml` for all configuration options.

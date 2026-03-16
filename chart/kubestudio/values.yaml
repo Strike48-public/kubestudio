@@ -47,6 +47,10 @@ connector:
   host: ""
   tenantId: ""
   instanceId: "kubestudio"
+  # -- Gateway identity and sidebar display label. When set, the connector gets
+  # its own gateway and appears as KubeStudio > connectorName > cluster in the
+  # sidebar. When empty, instances share the default gateway and round-robin.
+  connectorName: ""
   # -- Skip TLS verification for Matrix connections
   tlsInsecure: false
   # -- Persistent storage for connector credentials (keys + OTT tokens)

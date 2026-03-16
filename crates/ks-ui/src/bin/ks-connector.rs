@@ -533,7 +533,13 @@ async fn start_dioxus_server(ipc_addr: ks_ui::ipc::IpcAddr) {
                     Err(_) => None,
                 };
                 let connector_name = std::env::var("CONNECTOR_NAME").ok();
-                axum::Json(serde_json::to_value(app_manifest(cluster_name.as_deref(), connector_name.as_deref())).unwrap())
+                axum::Json(
+                    serde_json::to_value(app_manifest(
+                        cluster_name.as_deref(),
+                        connector_name.as_deref(),
+                    ))
+                    .unwrap(),
+                )
             }),
         )
         .route(

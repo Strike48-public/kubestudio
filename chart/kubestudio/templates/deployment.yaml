@@ -76,6 +76,10 @@ spec:
             {{- end }}
             - name: INSTANCE_ID
               value: {{ .Values.connector.instanceId | quote }}
+            {{- with .Values.connector.connectorName }}
+            - name: CONNECTOR_NAME
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.connector.tlsInsecure }}
             - name: MATRIX_TLS_INSECURE
               value: "true"
