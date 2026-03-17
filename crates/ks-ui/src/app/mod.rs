@@ -532,6 +532,22 @@ pub fn App() -> Element {
                     e.stop_propagation();
                     e.prevent_default();
                 }
+                Key::Tab => {
+                    // Tab-complete the current prediction
+                    let input = command_input.read().clone();
+                    if !input.is_empty()
+                        && let Some(alias) = plugin_config
+                            .read()
+                            .aliases
+                            .keys()
+                            .filter(|a| a.starts_with(&input))
+                            .min_by_key(|a| a.len())
+                    {
+                        command_input.set(alias.clone());
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
+                }
                 Key::Character(ref c) => {
                     // Append character to command input
                     let mut current = command_input.read().clone();
@@ -542,6 +558,7 @@ pub fn App() -> Element {
                 }
                 _ => {
                     e.stop_propagation();
+                    e.prevent_default();
                 }
             }
             return;
@@ -3148,6 +3165,8 @@ pub fn App() -> Element {
                             .collect()
                     };
 
+                    let prediction_for_tab = prediction.clone();
+
                     rsx! {
                         div {
                             class: "command-mode-bar",
@@ -3155,6 +3174,7 @@ pub fn App() -> Element {
                             input {
                                 class: "command-mode-input-capture",
                                 r#type: "text",
+                                value: "{input}",
                                 autofocus: true,
                                 onmounted: move |e| {
                                     let data = e.data();
@@ -3166,7 +3186,13 @@ pub fn App() -> Element {
                                     command_input.set(e.value().clone());
                                 },
                                 onkeydown: move |e: KeyboardEvent| {
-                                    if is_escape(&e) {
+                                    if e.key() == Key::Tab {
+                                        e.prevent_default();
+                                        e.stop_propagation();
+                                        if let Some((alias, _)) = &prediction_for_tab {
+                                            command_input.set(alias.clone());
+                                        }
+                                    } else if is_escape(&e) {
                                         command_mode_open.set(false);
                                         command_input.set(String::new());
                                         if let Some(app_ref) = app_container_ref.read().clone() {
@@ -3251,7 +3277,7 @@ pub fn App() -> Element {
                                 }
                             }
                             span { class: "command-mode-hint",
-                                "Enter " CornerDownLeft { size: 14 } "  Esc " X { size: 14 }
+                                "Tab ⇥  Enter " CornerDownLeft { size: 14 } "  Esc " X { size: 14 }
                             }
                         }
                     }
