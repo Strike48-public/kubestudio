@@ -272,6 +272,19 @@ async fn proxy_to_dioxus(path: &str, _params: &HashMap<String, String>) -> AppPa
 }
 
 /// Inject Phoenix Socket shim for Matrix WebSocket proxy
+/// Client-side Tab key interceptor.
+/// In liveview mode, `prevent_default()` runs server-side over WebSocket, so the
+/// browser has already executed the native Tab focus-cycle (highlighting the URL bar)
+/// before the round-trip completes. This small script runs on the client and prevents
+/// Tab's default behavior whenever the command mode bar is visible.
+const TAB_INTERCEPT_SCRIPT: &str = r#"<script>
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Tab' && document.querySelector('.command-mode-bar')) {
+    e.preventDefault();
+  }
+}, true);
+</script>"#;
+
 fn rewrite_dioxus_websocket_url(html: &str) -> String {
     let phoenix_shim = r#"<script>
 // Matrix Phoenix Socket Shim for Dioxus LiveView
@@ -499,7 +512,7 @@ fn rewrite_dioxus_websocket_url(html: &str) -> String {
         // Matrix Studio's TokenInjector handles injecting
         // window.__MATRIX_SESSION_TOKEN__ into the HTML before it reaches the
         // browser, so we only inject the Phoenix WebSocket shim here.
-        let injected = phoenix_shim.to_string();
+        let injected = format!("{}{}", phoenix_shim, TAB_INTERCEPT_SCRIPT);
 
         if let Some(head_end) = result.find("</head>") {
             result.insert_str(head_end, &injected);
