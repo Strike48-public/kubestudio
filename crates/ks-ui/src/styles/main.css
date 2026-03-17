@@ -3549,6 +3549,11 @@ code {
     color: var(--destructive);
 }
 
+.tool-status-running {
+    background: color-mix(in srgb, var(--primary) 20%, transparent);
+    color: var(--primary);
+}
+
 .tool-status-pending {
     background: color-mix(in srgb, var(--warning) 20%, transparent);
     color: var(--warning);
@@ -3605,6 +3610,38 @@ code {
     color: var(--destructive);
 }
 
+/* Tool call needing consent: warning highlight */
+.chat-tool-consent {
+    border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+    border-left: 3px solid var(--warning);
+}
+
+.chat-tool-consent .consent-tool-toggle {
+    display: flex;
+    gap: 2px;
+    padding: 0.3rem 0.5rem;
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.08);
+}
+
+/* Batch consent actions in thinking indicator */
+.consent-actions-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.consent-actions-bar .chat-status-label {
+    flex: 1;
+    min-width: 100%;
+    margin-bottom: 0.15rem;
+}
+
+.consent-actions-bar .consent-actions {
+    margin-top: 0;
+}
+
 /* ============================================
    CHAT: THINKING BLOCKS
    ============================================ */
@@ -3643,6 +3680,172 @@ code {
     font-size: 0.7rem;
     color: var(--muted-foreground);
     font-style: italic;
+}
+
+/* ============================================
+   CHAT: TOOL CONSENT BAR
+   ============================================ */
+
+.chat-consent-bar {
+    margin: 0.5rem 0.75rem;
+    padding: 0.5rem 0.6rem;
+    background: var(--secondary);
+    border: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border));
+    border-left: 3px solid var(--warning);
+    border-radius: 4px;
+    outline: none;
+}
+
+.consent-header {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--warning);
+}
+
+.consent-tool-item {
+    margin: 0.3rem 0;
+    padding: 0.35rem 0.5rem;
+    background: var(--background);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.consent-tool-name {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--foreground);
+    font-family: monospace;
+    margin-bottom: 0.15rem;
+}
+
+.consent-tool-args {
+    font-size: 0.65rem;
+    color: var(--foreground);
+    margin: 0 0 0.25rem 0;
+    padding: 0.2rem 0.4rem;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    line-height: 1.3;
+}
+
+.consent-tool-toggle {
+    display: flex;
+    gap: 2px;
+}
+
+.consent-chip {
+    font-size: 0.6rem;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    background: var(--secondary);
+    color: var(--muted-foreground);
+    transition: all 0.1s ease;
+}
+
+.consent-chip:hover {
+    filter: brightness(1.15);
+}
+
+.consent-chip.active-deny {
+    background: color-mix(in srgb, var(--destructive) 20%, var(--secondary));
+    border-color: var(--destructive);
+    color: var(--destructive);
+    font-weight: 600;
+}
+
+.consent-chip.active-allow {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+    font-weight: 600;
+}
+
+.consent-chip.active-always {
+    background: var(--warning);
+    border-color: var(--warning);
+    color: var(--background);
+    font-weight: 600;
+}
+
+.consent-actions {
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+    justify-content: flex-end;
+}
+
+.consent-btn {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.1s ease;
+    background: var(--secondary);
+    color: var(--foreground);
+}
+
+.consent-btn:hover {
+    filter: brightness(1.1);
+}
+
+.consent-btn.selected {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+}
+
+.consent-deny {
+    color: var(--muted-foreground);
+}
+
+.consent-deny:hover, .consent-deny.selected {
+    background: color-mix(in srgb, var(--destructive) 15%, var(--secondary));
+    border-color: var(--destructive);
+    color: var(--destructive);
+}
+
+.consent-allow {
+    background: color-mix(in srgb, var(--primary) 15%, var(--secondary));
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.consent-allow:hover, .consent-allow.selected {
+    background: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.consent-always {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+.consent-always:hover, .consent-always.selected {
+    background: var(--warning);
+    color: var(--background);
+    border-color: var(--warning);
+}
+
+.consent-confirm {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border-color: var(--primary);
+}
+
+.consent-confirm:hover {
+    filter: brightness(1.15);
 }
 
 /* ============================================

@@ -6,9 +6,12 @@
 
 use dioxus::prelude::*;
 use ks_kube::{
-    AgentInfo, ChatClient, ChatMessage, ConversationInfo, CreateAgentInput, MatrixChatClient,
-    MessagePart, ToolCallInfo, UpdateAgentInput,
+    AgentInfo, ChatClient, ChatMessage, ConsentAction, ConsentDecision, ConsentMode,
+    ConversationInfo, CreateAgentInput, MatrixChatClient, MessagePart, ToolCallInfo,
+    UpdateAgentInput,
 };
+
+use super::tool_confirm_modal::{ConsentResult, PendingToolCall, ToolConsentChoice};
 use lucide_dioxus::{ArrowDown, ChevronDown, ChevronRight, X};
 use pulldown_cmark::{Options, Parser, html};
 use std::collections::HashMap;
@@ -27,7 +30,9 @@ const CHAT_DEFAULT_WIDTH: i32 = 380;
 /// connector address pattern `{tenant}.app-kube-studio.*` so the Matrix
 /// backend can match registered connector tools to this agent.
 fn default_kubestudio_agent_input(tenant_id: &str) -> CreateAgentInput {
-    let connector_key = format!("{}.app-kube-studio.*", tenant_id);
+    let connector_name =
+        std::env::var("CONNECTOR_NAME").unwrap_or_else(|_| "app-kube-studio".to_string());
+    let connector_key = format!("{}.{}.*", tenant_id, connector_name);
 
     let mut connectors = serde_json::Map::new();
     connectors.insert(
@@ -40,10 +45,10 @@ fn default_kubestudio_agent_input(tenant_id: &str) -> CreateAgentInput {
                 "get_cluster_info": { "consent_mode": "auto", "enabled": true },
                 "get_current_context": { "consent_mode": "auto", "enabled": true },
                 "get_permissions": { "consent_mode": "auto", "enabled": true },
-                "toolbox_deploy": { "consent_mode": "auto", "enabled": true },
-                "toolbox_exec": { "consent_mode": "auto", "enabled": true },
+                "toolbox_deploy": { "consent_mode": "consent", "enabled": true },
+                "toolbox_exec": { "consent_mode": "consent", "enabled": true },
                 "toolbox_status": { "consent_mode": "auto", "enabled": true },
-                "toolbox_delete": { "consent_mode": "auto", "enabled": true }
+                "toolbox_delete": { "consent_mode": "consent", "enabled": true }
             }
         }),
     );
@@ -129,6 +134,15 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
 
     // Tool call expand/collapse state (by tool call id)
     let mut expanded_tools = use_signal(Vec::<String>::new);
+
+    // Tool consent state
+    let consent_pending: Signal<Vec<PendingToolCall>> = use_signal(Vec::new);
+    let mut consent_choice: Signal<Option<ConsentResult>> = use_signal(|| None);
+    let mut consent_selections: Signal<HashMap<String, usize>> = use_signal(HashMap::new);
+    let mut denied_tool_ids: Signal<std::collections::HashSet<String>> =
+        use_signal(std::collections::HashSet::new);
+    let always_allow_tools: Signal<std::collections::HashSet<String>> =
+        use_signal(std::collections::HashSet::new);
 
     // Auto-scroll state: track if user has scrolled up from the bottom
     let mut user_scrolled_up = use_signal(|| false);
@@ -343,10 +357,15 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                         client,
                         conv_id,
                         conversation_id,
-                        messages,
-                        agent_thinking,
-                        agent_status_text,
-                        error_msg,
+                        PollSignals {
+                            messages,
+                            agent_thinking,
+                            agent_status_text,
+                            error_msg,
+                            consent_pending,
+                            consent_choice,
+                            always_allow_tools,
+                        },
                     )
                     .await;
                 }
@@ -412,10 +431,15 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                         client,
                                         cid,
                                         conversation_id,
-                                        messages,
-                                        agent_thinking,
-                                        agent_status_text,
-                                        error_msg,
+                                        PollSignals {
+                                            messages,
+                                            agent_thinking,
+                                            agent_status_text,
+                                            error_msg,
+                                            consent_pending,
+                                            consent_choice,
+                                            always_allow_tools,
+                                        },
                                     )
                                     .await;
                                 }
@@ -513,10 +537,15 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                             client,
                             conv_id,
                             conversation_id,
-                            messages,
-                            agent_thinking,
-                            agent_status_text,
-                            error_msg,
+                            PollSignals {
+                                messages,
+                                agent_thinking,
+                                agent_status_text,
+                                error_msg,
+                                consent_pending,
+                                consent_choice,
+                                always_allow_tools,
+                            },
                         )
                         .await;
                     }
@@ -789,8 +818,8 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                                                 agent_thinking.set(true);
                                                                 agent_status_text.set("Thinking...".to_string());
                                                                 poll_and_update(
-                                                                    client, cid, conversation_id, messages, agent_thinking,
-                                                                    agent_status_text, error_msg,
+                                                                    client, cid, conversation_id,
+                                                                    PollSignals { messages, agent_thinking, agent_status_text, error_msg, consent_pending, consent_choice, always_allow_tools },
                                                                 )
                                                                 .await;
                                                             }
@@ -868,7 +897,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                     }
 
                     for msg in messages.read().iter() {
-                        {render_message(msg, &mut expanded_tools)}
+                        {render_message(msg, &mut expanded_tools, &consent_pending, &mut consent_selections, &denied_tool_ids)}
                     }
 
                     if agent_thinking() {
@@ -878,18 +907,82 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                     "{agent.name}"
                                 }
                             }
-                            div { class: "chat-thinking-status",
-                                if !agent_status_text.read().is_empty() {
-                                    span { class: "chat-status-label", "{agent_status_text}" }
+                            if !consent_pending.read().is_empty() {
+                                div { class: "consent-actions-bar",
+                                    span { class: "chat-status-label", "Approve tool calls above" }
+                                    div { class: "consent-actions",
+                                        button {
+                                            class: "consent-btn consent-deny",
+                                            onclick: move |_| {
+                                                let pending = consent_pending.read().clone();
+                                                {
+                                                    let mut denied = denied_tool_ids.write();
+                                                    for p in &pending {
+                                                        denied.insert(p.tool_call_id.clone());
+                                                    }
+                                                }
+                                                let decisions = pending.iter().map(|p| {
+                                                    (p.tool_call_id.clone(), ToolConsentChoice::Deny)
+                                                }).collect();
+                                                consent_choice.set(Some(ConsentResult { decisions }));
+                                            },
+                                            "Deny All"
+                                        }
+                                        button {
+                                            class: "consent-btn consent-allow",
+                                            onclick: move |_| {
+                                                let pending = consent_pending.read().clone();
+                                                let decisions = pending.iter().map(|p| {
+                                                    (p.tool_call_id.clone(), ToolConsentChoice::AllowOnce)
+                                                }).collect();
+                                                consent_choice.set(Some(ConsentResult { decisions }));
+                                            },
+                                            "Allow All"
+                                        }
+                                        button {
+                                            class: "consent-btn consent-confirm",
+                                            onclick: move |_| {
+                                                let pending = consent_pending.read().clone();
+                                                let sels = consent_selections.read().clone();
+                                                let mut denied_ids = Vec::new();
+                                                let decisions: HashMap<String, ToolConsentChoice> = pending.iter().map(|p| {
+                                                    let choice = match sels.get(&p.tool_call_id).copied().unwrap_or(1) {
+                                                        0 => {
+                                                            denied_ids.push(p.tool_call_id.clone());
+                                                            ToolConsentChoice::Deny
+                                                        }
+                                                        2 => ToolConsentChoice::AlwaysAllow,
+                                                        _ => ToolConsentChoice::AllowOnce,
+                                                    };
+                                                    (p.tool_call_id.clone(), choice)
+                                                }).collect();
+                                                if !denied_ids.is_empty() {
+                                                    let mut denied = denied_tool_ids.write();
+                                                    for id in denied_ids {
+                                                        denied.insert(id);
+                                                    }
+                                                }
+                                                consent_choice.set(Some(ConsentResult { decisions }));
+                                            },
+                                            "Confirm"
+                                        }
+                                    }
                                 }
-                                div { class: "chat-thinking-dots",
-                                    span { "." }
-                                    span { "." }
-                                    span { "." }
+                            } else {
+                                div { class: "chat-thinking-status",
+                                    if !agent_status_text.read().is_empty() {
+                                        span { class: "chat-status-label", "{agent_status_text}" }
+                                    }
+                                    div { class: "chat-thinking-dots",
+                                        span { "." }
+                                        span { "." }
+                                        span { "." }
+                                    }
                                 }
                             }
                         }
                     }
+
                 }
 
                 // Scroll-to-bottom button (shown when user has scrolled up)
@@ -935,6 +1028,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                     }
                 }
             }
+
         }
     }
 }
@@ -943,14 +1037,23 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
 // Polling helper with live status updates
 // ---------------------------------------------------------------------------
 
+/// Bundled signals used by the polling loop to update UI state.
+#[derive(Clone, Copy)]
+struct PollSignals {
+    messages: Signal<Vec<ChatMessage>>,
+    agent_thinking: Signal<bool>,
+    agent_status_text: Signal<String>,
+    error_msg: Signal<Option<String>>,
+    consent_pending: Signal<Vec<PendingToolCall>>,
+    consent_choice: Signal<Option<ConsentResult>>,
+    always_allow_tools: Signal<std::collections::HashSet<String>>,
+}
+
 async fn poll_and_update(
     client: Arc<MatrixChatClient>,
     conv_id: String,
     active_conversation_id: Signal<Option<String>>,
-    mut messages: Signal<Vec<ChatMessage>>,
-    mut agent_thinking: Signal<bool>,
-    mut agent_status_text: Signal<String>,
-    mut error_msg: Signal<Option<String>>,
+    mut sig: PollSignals,
 ) {
     let poll_interval_ms = 800u64;
     let max_polls = 150u32;
@@ -963,6 +1066,34 @@ async fn poll_and_update(
             .map(|c| c.as_str() == conv_id)
             .unwrap_or(false)
     }
+
+    /// Collect all tool calls awaiting consent from messages.
+    fn find_pending_tool_calls(msgs: &[ChatMessage]) -> Vec<PendingToolCall> {
+        let mut pending = Vec::new();
+        for msg in msgs.iter().rev() {
+            for part in &msg.parts {
+                if let MessagePart::ToolCall(tc) = part {
+                    let s = tc.status.to_lowercase();
+                    if s == "requested" || s == "pending" || s == "awaiting_consent" {
+                        pending.push(PendingToolCall {
+                            tool_call_id: tc.id.clone(),
+                            tool_name: tc.name.clone(),
+                            arguments: tc.arguments.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        pending
+    }
+
+    // Track tool call IDs we've already resolved in this poll session
+    // to avoid re-prompting for denied tools.
+    let mut resolved_ids = std::collections::HashSet::<String>::new();
+    // Track consecutive polls where AWAITING_CONSENT has no new pending tools.
+    // After a few such polls the backend should have transitioned; if it hasn't,
+    // re-send the resolved decisions to nudge it.
+    let mut stale_consent_polls = 0u32;
 
     for _attempt in 0..max_polls {
         match client.get_conversation(&conv_id).await {
@@ -982,29 +1113,199 @@ async fn poll_and_update(
                         "AWAITING_CLIENT_TOOLS" => "Running client tools...",
                         _ => "Thinking...",
                     };
-                    agent_status_text.set(status_label.to_string());
+                    sig.agent_status_text.set(status_label.to_string());
 
                     if !state.messages.is_empty() {
-                        messages.set(state.messages.clone());
+                        sig.messages.set(state.messages.clone());
                     }
 
-                    if done && has_agent_msg {
-                        messages.set(state.messages);
-                        agent_thinking.set(false);
-                        agent_status_text.set(String::new());
-                        return;
+                    // Handle consent flow when agent is waiting for approval
+                    if state.agent_status == "AWAITING_CONSENT" {
+                        let pending: Vec<PendingToolCall> =
+                            find_pending_tool_calls(&state.messages)
+                                .into_iter()
+                                .filter(|p| !resolved_ids.contains(&p.tool_call_id))
+                                .collect();
+                        if !pending.is_empty() {
+                            stale_consent_polls = 0;
+                            // Check if ALL pending tools are in the always-allow set
+                            let all_auto = pending
+                                .iter()
+                                .all(|p| sig.always_allow_tools.peek().contains(&p.tool_name));
+
+                            if all_auto {
+                                tracing::debug!(
+                                    "Auto-approving {} tool(s) (always-allow)",
+                                    pending.len()
+                                );
+                                let decisions: Vec<ConsentDecision> = pending
+                                    .iter()
+                                    .map(|p| ConsentDecision {
+                                        action: ConsentAction::Approve,
+                                        id: p.tool_call_id.clone(),
+                                        mode: Some(ConsentMode::Always),
+                                        reason: None,
+                                    })
+                                    .collect();
+                                if let Err(e) = client.resolve_consent(&conv_id, decisions).await {
+                                    tracing::error!("Failed to auto-approve consent: {}", e);
+                                }
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            } else {
+                                // Show the inline consent bar and wait for user decision
+                                sig.consent_choice.set(None);
+                                sig.consent_pending.set(pending.clone());
+
+                                // Wait until the user makes a choice
+                                let result = loop {
+                                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                    if let Some(r) = sig.consent_choice.peek().clone() {
+                                        break r;
+                                    }
+                                };
+
+                                // Clear the consent UI immediately
+                                sig.consent_pending.set(Vec::new());
+                                sig.consent_choice.set(None);
+
+                                // Build per-tool decisions from ConsentResult
+                                let decisions: Vec<ConsentDecision> = pending
+                                    .iter()
+                                    .map(|p| {
+                                        let choice = result
+                                            .decisions
+                                            .get(&p.tool_call_id)
+                                            .cloned()
+                                            .unwrap_or(ToolConsentChoice::Deny);
+                                        match choice {
+                                            ToolConsentChoice::AllowOnce => ConsentDecision {
+                                                action: ConsentAction::Approve,
+                                                id: p.tool_call_id.clone(),
+                                                mode: Some(ConsentMode::Once),
+                                                reason: None,
+                                            },
+                                            ToolConsentChoice::AlwaysAllow => {
+                                                sig.always_allow_tools
+                                                    .write()
+                                                    .insert(p.tool_name.clone());
+                                                ConsentDecision {
+                                                    action: ConsentAction::Approve,
+                                                    id: p.tool_call_id.clone(),
+                                                    mode: Some(ConsentMode::Always),
+                                                    reason: None,
+                                                }
+                                            }
+                                            ToolConsentChoice::Deny => ConsentDecision {
+                                                action: ConsentAction::Deny,
+                                                id: p.tool_call_id.clone(),
+                                                mode: None,
+                                                reason: Some(
+                                                    "User denied tool execution".to_string(),
+                                                ),
+                                            },
+                                        }
+                                    })
+                                    .collect();
+
+                                let approve_count = decisions
+                                    .iter()
+                                    .filter(|d| d.action == ConsentAction::Approve)
+                                    .count();
+                                let deny_count = decisions.len() - approve_count;
+                                tracing::debug!(
+                                    "Resolving consent: {} approved, {} denied",
+                                    approve_count,
+                                    deny_count
+                                );
+                                if let Err(e) = client.resolve_consent(&conv_id, decisions).await {
+                                    tracing::error!("Failed to resolve consent: {}", e);
+                                    sig.error_msg
+                                        .set(Some(format!("Failed to resolve consent: {}", e)));
+                                }
+                                // Track resolved IDs so we don't re-prompt
+                                for p in &pending {
+                                    resolved_ids.insert(p.tool_call_id.clone());
+                                }
+                                // Give the backend time to process before re-polling
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            }
+                        } else {
+                            // All pending tool calls already resolved — backend
+                            // hasn't transitioned yet. After several stale polls,
+                            // re-resolve remaining stale tool calls so the backend
+                            // can transition out of AWAITING_CONSENT.
+                            stale_consent_polls += 1;
+                            if stale_consent_polls >= 3 {
+                                stale_consent_polls = 0;
+                                let stale_pending = find_pending_tool_calls(&state.messages);
+                                if !stale_pending.is_empty() {
+                                    tracing::debug!(
+                                        "Re-resolving {} stale consent tool calls",
+                                        stale_pending.len()
+                                    );
+                                    // Re-send approvals for tools the user approved
+                                    // (in always_allow set), deny the rest
+                                    let decisions: Vec<ConsentDecision> = stale_pending
+                                        .iter()
+                                        .map(|p| {
+                                            if sig.always_allow_tools.peek().contains(&p.tool_name)
+                                            {
+                                                ConsentDecision {
+                                                    action: ConsentAction::Approve,
+                                                    id: p.tool_call_id.clone(),
+                                                    mode: Some(ConsentMode::Always),
+                                                    reason: None,
+                                                }
+                                            } else {
+                                                ConsentDecision {
+                                                    action: ConsentAction::Deny,
+                                                    id: p.tool_call_id.clone(),
+                                                    mode: None,
+                                                    reason: Some(
+                                                        "User denied tool execution".to_string(),
+                                                    ),
+                                                }
+                                            }
+                                        })
+                                        .collect();
+                                    let _ = client.resolve_consent(&conv_id, decisions).await;
+                                    // Also track them so we don't loop forever
+                                    for p in &stale_pending {
+                                        resolved_ids.insert(p.tool_call_id.clone());
+                                    }
+                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                }
+                            }
+                        }
+                    } else {
+                        stale_consent_polls = 0;
+                    }
+
+                    if done {
+                        // Agent finished. Prefer waiting for a text message,
+                        // but always exit if status is ERROR or we have any
+                        // non-user messages (even tool-call-only).
+                        let has_any_agent_msg =
+                            state.messages.iter().any(|m| m.sender_type != "USER");
+                        if has_agent_msg || state.agent_status == "ERROR" || has_any_agent_msg {
+                            sig.messages.set(state.messages);
+                            sig.agent_thinking.set(false);
+                            sig.agent_status_text.set(String::new());
+                            sig.consent_pending.set(Vec::new());
+                            return;
+                        }
                     }
                 } else if done && has_agent_msg {
-                    // Conversation finished while user was viewing another one.
-                    // Don't touch UI — it belongs to the other conversation now.
                     return;
                 }
             }
             Err(e) => {
                 if is_active(&active_conversation_id, &conv_id) {
-                    error_msg.set(Some(format!("Failed to get response: {}", e)));
-                    agent_thinking.set(false);
-                    agent_status_text.set(String::new());
+                    sig.error_msg
+                        .set(Some(format!("Failed to get response: {}", e)));
+                    sig.agent_thinking.set(false);
+                    sig.agent_status_text.set(String::new());
+                    sig.consent_pending.set(Vec::new());
                 }
                 return;
             }
@@ -1016,11 +1317,12 @@ async fn poll_and_update(
     // Final poll after timeout
     if is_active(&active_conversation_id, &conv_id) {
         match client.get_conversation(&conv_id).await {
-            Ok(state) => messages.set(state.messages),
-            Err(e) => error_msg.set(Some(format!("Polling timed out: {}", e))),
+            Ok(state) => sig.messages.set(state.messages),
+            Err(e) => sig.error_msg.set(Some(format!("Polling timed out: {}", e))),
         }
-        agent_thinking.set(false);
-        agent_status_text.set(String::new());
+        sig.agent_thinking.set(false);
+        sig.agent_status_text.set(String::new());
+        sig.consent_pending.set(Vec::new());
     }
 }
 
@@ -1028,7 +1330,13 @@ async fn poll_and_update(
 // Message rendering with rich parts
 // ---------------------------------------------------------------------------
 
-fn render_message(msg: &ChatMessage, expanded_tools: &mut Signal<Vec<String>>) -> Element {
+fn render_message(
+    msg: &ChatMessage,
+    expanded_tools: &mut Signal<Vec<String>>,
+    consent_pending: &Signal<Vec<PendingToolCall>>,
+    consent_selections: &mut Signal<HashMap<String, usize>>,
+    denied_tool_ids: &Signal<std::collections::HashSet<String>>,
+) -> Element {
     let is_user = msg.sender_type == "USER";
     let bubble_class = if is_user {
         "chat-bubble chat-bubble-user"
@@ -1093,7 +1401,7 @@ fn render_message(msg: &ChatMessage, expanded_tools: &mut Signal<Vec<String>>) -
                         }
                     }
                     MessagePart::ToolCall(tc) => {
-                        render_tool_call(tc, expanded_tools)
+                        render_tool_call(tc, expanded_tools, consent_pending, consent_selections, denied_tool_ids)
                     }
                 }}
             }
@@ -1101,23 +1409,65 @@ fn render_message(msg: &ChatMessage, expanded_tools: &mut Signal<Vec<String>>) -
     }
 }
 
-fn render_tool_call(tc: &ToolCallInfo, expanded_tools: &mut Signal<Vec<String>>) -> Element {
-    let is_expanded = expanded_tools.read().contains(&tc.id);
+fn render_tool_call(
+    tc: &ToolCallInfo,
+    expanded_tools: &mut Signal<Vec<String>>,
+    consent_pending: &Signal<Vec<PendingToolCall>>,
+    consent_selections: &mut Signal<HashMap<String, usize>>,
+    denied_tool_ids: &Signal<std::collections::HashSet<String>>,
+) -> Element {
+    let needs_consent = consent_pending
+        .read()
+        .iter()
+        .any(|p| p.tool_call_id == tc.id);
+    let is_denied_local = denied_tool_ids.read().contains(&tc.id);
+
+    // Auto-expand tool calls needing consent so user sees arguments
+    let is_expanded = needs_consent || expanded_tools.read().contains(&tc.id);
     let tc_id_toggle = tc.id.clone();
     let name = tc.name.clone();
-    let status = tc.status.clone();
     let args = tc.arguments.clone();
     let result = tc.result.clone();
     let error = tc.error.clone();
 
-    let status_class = match status.as_str() {
-        "completed" | "success" => "tool-status-success",
-        "error" | "failed" => "tool-status-error",
-        _ => "tool-status-pending",
+    // Infer actual status with local override for denied tools
+    let (display_status, status_class) = if is_denied_local && result.is_none() && error.is_none() {
+        ("denied".to_string(), "tool-status-error")
+    } else if result.is_some() {
+        ("success".to_string(), "tool-status-success")
+    } else if error.is_some() {
+        ("error".to_string(), "tool-status-error")
+    } else if needs_consent {
+        ("awaiting".to_string(), "tool-status-pending")
+    } else {
+        let s = tc.status.to_lowercase();
+        match s.as_str() {
+            "completed" | "success" => ("success".to_string(), "tool-status-success"),
+            "error" | "failed" | "denied" => (s.clone(), "tool-status-error"),
+            "executing" | "running" => ("running".to_string(), "tool-status-running"),
+            _ => (s.clone(), "tool-status-pending"),
+        }
+    };
+
+    // Consent selection for this tool (0=Deny, 1=Allow, 2=Always)
+    let sel_val = if needs_consent {
+        consent_selections.read().get(&tc.id).copied().unwrap_or(1)
+    } else {
+        1
+    };
+    let tc_id_0 = tc.id.clone();
+    let tc_id_1 = tc.id.clone();
+    let tc_id_2 = tc.id.clone();
+    let mut sels = *consent_selections;
+
+    let tool_class = if needs_consent {
+        "chat-tool-call chat-tool-consent"
+    } else {
+        "chat-tool-call"
     };
 
     rsx! {
-        div { class: "chat-tool-call",
+        div { class: "{tool_class}",
             div {
                 class: "chat-tool-header",
                 onclick: {
@@ -1139,7 +1489,7 @@ fn render_tool_call(tc: &ToolCallInfo, expanded_tools: &mut Signal<Vec<String>>)
                     }
                 }
                 span { class: "chat-tool-name", "{name}" }
-                span { class: "chat-tool-status {status_class}", "{status}" }
+                span { class: "chat-tool-status {status_class}", "{display_status}" }
             }
             if is_expanded {
                 div { class: "chat-tool-details",
@@ -1160,6 +1510,26 @@ fn render_tool_call(tc: &ToolCallInfo, expanded_tools: &mut Signal<Vec<String>>)
                             div { class: "chat-tool-section-label", "Error" }
                             pre { class: "chat-tool-code", "{err_str}" }
                         }
+                    }
+                }
+            }
+            // Inline consent buttons within the tool call box
+            if needs_consent {
+                div { class: "consent-tool-toggle",
+                    button {
+                        class: if sel_val == 0 { "consent-chip active-deny" } else { "consent-chip" },
+                        onclick: move |_| { sels.write().insert(tc_id_0.clone(), 0); },
+                        "Deny"
+                    }
+                    button {
+                        class: if sel_val == 1 { "consent-chip active-allow" } else { "consent-chip" },
+                        onclick: move |_| { sels.write().insert(tc_id_1.clone(), 1); },
+                        "Allow"
+                    }
+                    button {
+                        class: if sel_val == 2 { "consent-chip active-always" } else { "consent-chip" },
+                        onclick: move |_| { sels.write().insert(tc_id_2.clone(), 2); },
+                        "Always"
                     }
                 }
             }

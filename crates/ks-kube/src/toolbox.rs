@@ -613,23 +613,44 @@ impl Toolbox {
                 message: format!("Failed to exec command: {}", e),
             })?;
 
-        // Read stdout
+        // Read stdout + stderr with a timeout to avoid hanging on stalled connections
+        let exec_timeout = std::time::Duration::from_secs(120);
+
         let mut stdout_buf = Vec::new();
         if let Some(mut stdout) = attached.stdout() {
-            stdout.read_to_end(&mut stdout_buf).await.ok();
+            match tokio::time::timeout(exec_timeout, stdout.read_to_end(&mut stdout_buf)).await {
+                Ok(res) => {
+                    res.ok();
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "toolbox exec: stdout read timed out after {}s",
+                        exec_timeout.as_secs()
+                    );
+                }
+            }
         }
 
-        // Read stderr
         let mut stderr_buf = Vec::new();
         if let Some(mut stderr) = attached.stderr() {
-            stderr.read_to_end(&mut stderr_buf).await.ok();
+            match tokio::time::timeout(exec_timeout, stderr.read_to_end(&mut stderr_buf)).await {
+                Ok(res) => {
+                    res.ok();
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "toolbox exec: stderr read timed out after {}s",
+                        exec_timeout.as_secs()
+                    );
+                }
+            }
         }
 
-        // Get exit status
+        // Get exit status (with timeout)
         let exit_status = attached.take_status();
         let exit_code = if let Some(status) = exit_status {
-            match status.await {
-                Some(status) => {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), status).await {
+                Ok(Some(status)) => {
                     if status.status == Some("Success".to_string()) {
                         Some(0)
                     } else {
@@ -642,7 +663,11 @@ impl Toolbox {
                             .or(Some(1))
                     }
                 }
-                None => None,
+                Ok(None) => None,
+                Err(_) => {
+                    tracing::warn!("toolbox exec: exit status timed out");
+                    None
+                }
             }
         } else {
             None
