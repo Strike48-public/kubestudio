@@ -20,3 +20,12 @@ pub fn format_age(timestamp: Option<&Time>) -> String {
         "-".to_string()
     }
 }
+
+/// Compute precise age in seconds from a Kubernetes timestamp (for sorting)
+pub fn age_seconds(timestamp: Option<&Time>) -> Option<i64> {
+    timestamp.map(|ts| {
+        let created = ts.0;
+        let now = chrono::Utc::now();
+        now.signed_duration_since(created).num_seconds()
+    })
+}

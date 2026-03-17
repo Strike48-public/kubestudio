@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use lucide_dioxus::{ChevronDown, ChevronUp};
+use std::cmp::Ordering;
 use std::rc::Rc;
 
 // Virtual scrolling constants
@@ -13,8 +15,175 @@ pub struct ResourceItem {
     pub namespace: Option<String>,
     pub status: String,
     pub age: String,
+    /// Precise age in seconds for sorting (avoids lossy display-string parsing)
+    #[allow(unused)]
+    pub age_seconds: Option<i64>,
     pub ready: Option<String>,
     pub restarts: Option<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SortColumn {
+    Name,
+    Namespace,
+    Ready,
+    Status,
+    Restarts,
+    Age,
+}
+
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
+pub struct SortState {
+    pub column: Option<SortColumn>,
+    pub direction: Option<SortDirection>,
+}
+
+impl SortState {
+    fn cycle(self, column: SortColumn) -> Self {
+        if self.column == Some(column) {
+            match self.direction {
+                Some(SortDirection::Ascending) => SortState {
+                    column: Some(column),
+                    direction: Some(SortDirection::Descending),
+                },
+                Some(SortDirection::Descending) => SortState::default(),
+                _ => SortState {
+                    column: Some(column),
+                    direction: Some(SortDirection::Ascending),
+                },
+            }
+        } else {
+            SortState {
+                column: Some(column),
+                direction: Some(SortDirection::Ascending),
+            }
+        }
+    }
+
+    fn is_asc(&self, column: SortColumn) -> bool {
+        self.column == Some(column) && self.direction == Some(SortDirection::Ascending)
+    }
+
+    fn is_desc(&self, column: SortColumn) -> bool {
+        self.column == Some(column) && self.direction == Some(SortDirection::Descending)
+    }
+}
+
+fn parse_age_to_seconds(age: &str) -> Option<i64> {
+    let age = age.trim();
+    if age.is_empty() || age == "-" {
+        return None;
+    }
+    let mut total: i64 = 0;
+    let mut num_buf = String::new();
+    for ch in age.chars() {
+        if ch.is_ascii_digit() {
+            num_buf.push(ch);
+        } else {
+            let n: i64 = num_buf.parse().ok()?;
+            num_buf.clear();
+            match ch {
+                'd' => total += n * 86400,
+                'h' => total += n * 3600,
+                'm' => total += n * 60,
+                's' => total += n,
+                _ => return None,
+            }
+        }
+    }
+    if total > 0 { Some(total) } else { None }
+}
+
+/// Returns (numerator, denominator) for "X/Y" ready strings.
+/// Sorting: by fraction (num/den) first, then by denominator as tiebreaker
+/// so 1/1 < 2/2 < 3/3 when all are fully ready.
+fn parse_ready_parts(ready: &str) -> Option<(i64, i64)> {
+    let parts: Vec<&str> = ready.split('/').collect();
+    if parts.len() == 2 {
+        let num: i64 = parts[0].trim().parse().ok()?;
+        let den: i64 = parts[1].trim().parse().ok()?;
+        if den > 0 {
+            return Some((num, den));
+        }
+    }
+    None
+}
+
+fn compare_ready(a: &str, b: &str) -> Ordering {
+    match (parse_ready_parts(a), parse_ready_parts(b)) {
+        (Some((an, ad)), Some((bn, bd))) => {
+            // Compare by fraction first (as f64)
+            let a_frac = an as f64 / ad as f64;
+            let b_frac = bn as f64 / bd as f64;
+            let frac_cmp = a_frac.partial_cmp(&b_frac).unwrap_or(Ordering::Equal);
+            if frac_cmp != Ordering::Equal {
+                frac_cmp
+            } else {
+                // Same fraction — tiebreak by total (denominator)
+                ad.cmp(&bd)
+            }
+        }
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.to_lowercase().cmp(&b.to_lowercase()),
+    }
+}
+
+fn status_severity(status: &str) -> u8 {
+    match status.to_lowercase().as_str() {
+        "running" | "active" | "ready" | "bound" | "available" | "complete" | "succeeded"
+        | "in use" => 0,
+        "pending" | "creating" | "updating" | "progressing" | "suspended" | "containercreating" => {
+            1
+        }
+        "failed" | "error" | "crashloopbackoff" | "imagepullbackoff" | "notready" | "oomkilled"
+        | "stalled" => 2,
+        "terminating" | "deleting" => 3,
+        _ => 4,
+    }
+}
+
+fn sort_resources(items: &mut [ResourceItem], state: &SortState) {
+    let (Some(column), Some(direction)) = (state.column, state.direction) else {
+        return;
+    };
+    items.sort_by(|a, b| {
+        let ord = match column {
+            SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            SortColumn::Namespace => {
+                let a_ns = a.namespace.as_deref().unwrap_or("");
+                let b_ns = b.namespace.as_deref().unwrap_or("");
+                a_ns.to_lowercase().cmp(&b_ns.to_lowercase())
+            }
+            SortColumn::Ready => compare_ready(
+                a.ready.as_deref().unwrap_or(""),
+                b.ready.as_deref().unwrap_or(""),
+            ),
+            SortColumn::Status => status_severity(&a.status).cmp(&status_severity(&b.status)),
+            SortColumn::Restarts => a.restarts.unwrap_or(0).cmp(&b.restarts.unwrap_or(0)),
+            SortColumn::Age => {
+                // Prefer precise age_seconds when available, fall back to display string parsing
+                let a_secs = a.age_seconds.or_else(|| parse_age_to_seconds(&a.age));
+                let b_secs = b.age_seconds.or_else(|| parse_age_to_seconds(&b.age));
+                match (a_secs, b_secs) {
+                    (Some(a_s), Some(b_s)) => a_s.cmp(&b_s),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            }
+        };
+        match direction {
+            SortDirection::Ascending => ord,
+            SortDirection::Descending => ord.reverse(),
+        }
+    });
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -39,6 +208,9 @@ pub struct ResourceListProps {
     /// Whether this list has keyboard focus (controls selection highlight visibility)
     #[props(default = true)]
     pub is_focused: bool,
+    /// Sort state (managed by parent for persistence across data refreshes)
+    #[props(default = None)]
+    pub sort_state: Option<Signal<SortState>>,
 }
 
 fn get_status_class(status: &str) -> &str {
@@ -68,6 +240,10 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
     let mut local_selected = use_signal(|| None::<usize>);
     let selected_index = props.selected_index.unwrap_or(local_selected);
 
+    // Sort state - external or local
+    let local_sort = use_signal(SortState::default);
+    let mut sort = props.sort_state.unwrap_or(local_sort);
+
     // Virtual scrolling state
     let mut scroll_top = use_signal(|| 0.0f64);
     let mut container_height = use_signal(|| 600.0f64);
@@ -96,7 +272,8 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
         }
     });
 
-    let filtered_items: Vec<ResourceItem> = props
+    let current_sort = *sort.read();
+    let mut filtered_items: Vec<ResourceItem> = props
         .items
         .iter()
         .filter(|item| {
@@ -110,6 +287,7 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
         })
         .cloned()
         .collect();
+    sort_resources(&mut filtered_items, &current_sort);
 
     let item_count = filtered_items.len();
     let use_virtual_scroll = item_count >= VIRTUAL_SCROLL_THRESHOLD;
@@ -323,18 +501,84 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
                                 thead {
                                     tr {
                                         th { class: "col-status", "" }
-                                        th { class: "col-name", "Name" }
+                                        th {
+                                            class: "col-name sortable-header",
+                                            onclick: move |_| {
+                                                sort.set(current_sort.cycle(SortColumn::Name));
+                                                update_selection(None);
+                                            },
+                                            span { class: "sortable-header-content",
+                                                "Name"
+                                                if current_sort.is_asc(SortColumn::Name) { ChevronUp { size: 14 } }
+                                                if current_sort.is_desc(SortColumn::Name) { ChevronDown { size: 14 } }
+                                            }
+                                        }
                                         if has_namespace {
-                                            th { class: "col-namespace", "Namespace" }
+                                            th {
+                                                class: "col-namespace sortable-header",
+                                                onclick: move |_| {
+                                                    sort.set(current_sort.cycle(SortColumn::Namespace));
+                                                    update_selection(None);
+                                                },
+                                                span { class: "sortable-header-content",
+                                                    "Namespace"
+                                                    if current_sort.is_asc(SortColumn::Namespace) { ChevronUp { size: 14 } }
+                                                    if current_sort.is_desc(SortColumn::Namespace) { ChevronDown { size: 14 } }
+                                                }
+                                            }
                                         }
                                         if has_ready {
-                                            th { class: "col-ready", "Ready" }
+                                            th {
+                                                class: "col-ready sortable-header",
+                                                onclick: move |_| {
+                                                    sort.set(current_sort.cycle(SortColumn::Ready));
+                                                    update_selection(None);
+                                                },
+                                                span { class: "sortable-header-content",
+                                                    "Ready"
+                                                    if current_sort.is_asc(SortColumn::Ready) { ChevronUp { size: 14 } }
+                                                    if current_sort.is_desc(SortColumn::Ready) { ChevronDown { size: 14 } }
+                                                }
+                                            }
                                         }
-                                        th { class: "col-status-text", "Status" }
+                                        th {
+                                            class: "col-status-text sortable-header",
+                                            onclick: move |_| {
+                                                sort.set(current_sort.cycle(SortColumn::Status));
+                                                update_selection(None);
+                                            },
+                                            span { class: "sortable-header-content",
+                                                "Status"
+                                                if current_sort.is_asc(SortColumn::Status) { ChevronUp { size: 14 } }
+                                                if current_sort.is_desc(SortColumn::Status) { ChevronDown { size: 14 } }
+                                            }
+                                        }
                                         if has_restarts {
-                                            th { class: "col-restarts", "Restarts" }
+                                            th {
+                                                class: "col-restarts sortable-header",
+                                                onclick: move |_| {
+                                                    sort.set(current_sort.cycle(SortColumn::Restarts));
+                                                    update_selection(None);
+                                                },
+                                                span { class: "sortable-header-content",
+                                                    "Restarts"
+                                                    if current_sort.is_asc(SortColumn::Restarts) { ChevronUp { size: 14 } }
+                                                    if current_sort.is_desc(SortColumn::Restarts) { ChevronDown { size: 14 } }
+                                                }
+                                            }
                                         }
-                                        th { class: "col-age", "Age" }
+                                        th {
+                                            class: "col-age sortable-header",
+                                            onclick: move |_| {
+                                                sort.set(current_sort.cycle(SortColumn::Age));
+                                                update_selection(None);
+                                            },
+                                            span { class: "sortable-header-content",
+                                                "Age"
+                                                if current_sort.is_asc(SortColumn::Age) { ChevronUp { size: 14 } }
+                                                if current_sort.is_desc(SortColumn::Age) { ChevronDown { size: 14 } }
+                                            }
+                                        }
                                     }
                                 }
                                 tbody {
@@ -448,18 +692,84 @@ pub fn ResourceList(mut props: ResourceListProps) -> Element {
                         thead {
                             tr {
                                 th { class: "col-status", "" }
-                                th { class: "col-name", "Name" }
+                                th {
+                                    class: "col-name sortable-header",
+                                    onclick: move |_| {
+                                        sort.set(current_sort.cycle(SortColumn::Name));
+                                        update_selection(None);
+                                    },
+                                    span { class: "sortable-header-content",
+                                        "Name"
+                                        if current_sort.is_asc(SortColumn::Name) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(SortColumn::Name) { ChevronDown { size: 14 } }
+                                    }
+                                }
                                 if has_namespace {
-                                    th { class: "col-namespace", "Namespace" }
+                                    th {
+                                        class: "col-namespace sortable-header",
+                                        onclick: move |_| {
+                                            sort.set(current_sort.cycle(SortColumn::Namespace));
+                                            update_selection(None);
+                                        },
+                                        span { class: "sortable-header-content",
+                                            "Namespace"
+                                            if current_sort.is_asc(SortColumn::Namespace) { ChevronUp { size: 14 } }
+                                            if current_sort.is_desc(SortColumn::Namespace) { ChevronDown { size: 14 } }
+                                        }
+                                    }
                                 }
                                 if has_ready {
-                                    th { class: "col-ready", "Ready" }
+                                    th {
+                                        class: "col-ready sortable-header",
+                                        onclick: move |_| {
+                                            sort.set(current_sort.cycle(SortColumn::Ready));
+                                            update_selection(None);
+                                        },
+                                        span { class: "sortable-header-content",
+                                            "Ready"
+                                            if current_sort.is_asc(SortColumn::Ready) { ChevronUp { size: 14 } }
+                                            if current_sort.is_desc(SortColumn::Ready) { ChevronDown { size: 14 } }
+                                        }
+                                    }
                                 }
-                                th { class: "col-status-text", "Status" }
+                                th {
+                                    class: "col-status-text sortable-header",
+                                    onclick: move |_| {
+                                        sort.set(current_sort.cycle(SortColumn::Status));
+                                        update_selection(None);
+                                    },
+                                    span { class: "sortable-header-content",
+                                        "Status"
+                                        if current_sort.is_asc(SortColumn::Status) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(SortColumn::Status) { ChevronDown { size: 14 } }
+                                    }
+                                }
                                 if has_restarts {
-                                    th { class: "col-restarts", "Restarts" }
+                                    th {
+                                        class: "col-restarts sortable-header",
+                                        onclick: move |_| {
+                                            sort.set(current_sort.cycle(SortColumn::Restarts));
+                                            update_selection(None);
+                                        },
+                                        span { class: "sortable-header-content",
+                                            "Restarts"
+                                            if current_sort.is_asc(SortColumn::Restarts) { ChevronUp { size: 14 } }
+                                            if current_sort.is_desc(SortColumn::Restarts) { ChevronDown { size: 14 } }
+                                        }
+                                    }
                                 }
-                                th { class: "col-age", "Age" }
+                                th {
+                                    class: "col-age sortable-header",
+                                    onclick: move |_| {
+                                        sort.set(current_sort.cycle(SortColumn::Age));
+                                        update_selection(None);
+                                    },
+                                    span { class: "sortable-header-content",
+                                        "Age"
+                                        if current_sort.is_asc(SortColumn::Age) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(SortColumn::Age) { ChevronDown { size: 14 } }
+                                    }
+                                }
                             }
                         }
                         tbody {

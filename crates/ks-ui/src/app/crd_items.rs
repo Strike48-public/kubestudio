@@ -1,6 +1,6 @@
 //! Convert DynamicObjects to ResourceItems for display
 
-use super::helpers::format_age;
+use super::helpers::{age_seconds, format_age};
 use crate::components::ResourceItem;
 use ks_kube::{CrdInfo, PrinterColumn};
 use kube::ResourceExt;
@@ -27,6 +27,7 @@ pub fn dynamic_objects_to_items(objects: &[DynamicObject], crd: &CrdInfo) -> Vec
                 namespace,
                 status,
                 age,
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
