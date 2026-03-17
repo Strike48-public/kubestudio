@@ -12,8 +12,8 @@ use crate::components::{
     ActionConfirmModal, ActionTarget, ActionType, ApplyManifest, ApplySource, ChatPanel,
     ClusterOverview, CommandPalette, ContainerDrillDown, Context, CreateResource,
     CronJobJobsDrillDown, DeleteModal, DeleteTarget, ExecViewer, HotkeysBar, LogViewer, NodeList,
-    PortForwardModal, PortForwardsList, PvcPodsDrillDown, ResourceItem, ResourceList,
-    ServicePodsDrillDown, Sidebar, WorkloadPodsDrillDown, YamlViewer,
+    NodeSortState, PortForwardModal, PortForwardsList, PvcPodsDrillDown, ResourceItem,
+    ResourceList, ServicePodsDrillDown, Sidebar, SortState, WorkloadPodsDrillDown, YamlViewer,
     get_all_sidebar_items_with_crds, get_overview_card_count, get_overview_card_target,
 };
 use crate::hooks::{
@@ -223,6 +223,10 @@ pub fn App() -> Element {
 
     // Search state
     let search_term = use_signal(String::new);
+
+    // Sort state for resource list and node list
+    let sort_state = use_signal(SortState::default);
+    let node_sort_state = use_signal(NodeSortState::default);
 
     // Focus zone tracking
     let mut focus = use_focus();
@@ -1993,6 +1997,7 @@ pub fn App() -> Element {
                                             app_container_ref: Some(app_container_ref),
                                             selected_index: Some(selected_index),
                                             search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                             on_select: move |item: ResourceItem| {
                                                 selected_resource.set(Some(item.clone()));
                                                 // Drill down to container selection
@@ -2113,6 +2118,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to deployment's pods
@@ -2230,6 +2236,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to service endpoints
@@ -2348,6 +2355,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to statefulset's pods
@@ -2466,6 +2474,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to daemonset's pods
@@ -2584,6 +2593,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to job's pods
@@ -2727,6 +2737,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to cronjob's jobs
@@ -2753,6 +2764,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2769,6 +2781,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2785,6 +2798,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2801,6 +2815,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2817,6 +2832,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2924,6 +2940,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to PVC's pods
@@ -2950,6 +2967,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2971,6 +2989,7 @@ pub fn App() -> Element {
                                     is_focused: list_is_focused,
                                     metrics: metrics_map,
                                     metrics_available: metrics_available,
+                                    sort_state: Some(node_sort_state),
                                     on_select: move |node: k8s_openapi::api::core::v1::Node| {
                                         let name = node.metadata.name.clone().unwrap_or_default();
                                         selected_resource.set(Some(ResourceItem {
@@ -2978,6 +2997,7 @@ pub fn App() -> Element {
                                             namespace: None,
                                             status: "Node".to_string(),
                                             age: String::new(),
+                                            age_seconds: None,
                                             ready: None,
                                             restarts: None,
                                         }));
@@ -2999,6 +3019,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -3017,6 +3038,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3036,6 +3058,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3055,6 +3078,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3074,6 +3098,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3098,6 +3123,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
