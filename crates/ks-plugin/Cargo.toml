@@ -12,3 +12,6 @@ tracing.workspace = true
 
 # Platform-specific config directory
 dirs.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

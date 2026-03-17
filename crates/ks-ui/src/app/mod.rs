@@ -8,13 +8,77 @@ pub use helpers::format_age;
 pub use hotkeys::{get_commands, get_commands_with_tools, get_hotkeys};
 pub use resource_items::*;
 
+use dioxus::prelude::keyboard_types::Code;
+
+/// Convert a physical key `Code` to the key string used for hotkey matching.
+/// This is needed because when Ctrl is held, some webviews report control characters
+/// (e.g. Ctrl+I → Tab, Ctrl+H → Backspace) instead of the physical key letter.
+pub fn code_to_key_str(code: Code) -> Option<String> {
+    let s = match code {
+        Code::KeyA => "a",
+        Code::KeyB => "b",
+        Code::KeyC => "c",
+        Code::KeyD => "d",
+        Code::KeyE => "e",
+        Code::KeyF => "f",
+        Code::KeyG => "g",
+        Code::KeyH => "h",
+        Code::KeyI => "i",
+        Code::KeyJ => "j",
+        Code::KeyK => "k",
+        Code::KeyL => "l",
+        Code::KeyM => "m",
+        Code::KeyN => "n",
+        Code::KeyO => "o",
+        Code::KeyP => "p",
+        Code::KeyQ => "q",
+        Code::KeyR => "r",
+        Code::KeyS => "s",
+        Code::KeyT => "t",
+        Code::KeyU => "u",
+        Code::KeyV => "v",
+        Code::KeyW => "w",
+        Code::KeyX => "x",
+        Code::KeyY => "y",
+        Code::KeyZ => "z",
+        Code::Digit0 => "0",
+        Code::Digit1 => "1",
+        Code::Digit2 => "2",
+        Code::Digit3 => "3",
+        Code::Digit4 => "4",
+        Code::Digit5 => "5",
+        Code::Digit6 => "6",
+        Code::Digit7 => "7",
+        Code::Digit8 => "8",
+        Code::Digit9 => "9",
+        Code::Comma => ",",
+        Code::Period => ".",
+        Code::Semicolon => ";",
+        Code::Quote => "'",
+        Code::BracketLeft => "[",
+        Code::BracketRight => "]",
+        Code::Backquote => "`",
+        Code::Backslash => "\\",
+        Code::Slash => "/",
+        Code::Minus => "-",
+        Code::Equal => "=",
+        Code::Space => " ",
+        Code::Enter => "Enter",
+        Code::Tab => "Tab",
+        Code::Backspace => "Backspace",
+        Code::Delete => "Delete",
+        _ => return None,
+    };
+    Some(s.to_string())
+}
+
 use crate::components::{
     ActionConfirmModal, ActionTarget, ActionType, ApplyManifest, ApplySource, ChatPanel,
     ClusterOverview, CommandPalette, ContainerDrillDown, Context, CreateResource,
-    CronJobJobsDrillDown, DeleteModal, DeleteTarget, ExecViewer, HotkeysBar, LogViewer, NodeList,
-    PortForwardModal, PortForwardsList, PvcPodsDrillDown, ResourceItem, ResourceList,
-    ServicePodsDrillDown, Sidebar, WorkloadPodsDrillDown, YamlViewer,
-    get_all_sidebar_items_with_crds, get_overview_card_count, get_overview_card_target,
+    CronJobJobsDrillDown, DeleteModal, DeleteTarget, ExecViewer, HotkeysBar, KeybindingsModal,
+    LogViewer, NodeList, NodeSortState, PortForwardModal, PortForwardsList, PvcPodsDrillDown,
+    ResourceItem, ResourceList, ServicePodsDrillDown, Sidebar, SortState, WorkloadPodsDrillDown,
+    YamlViewer, get_all_sidebar_items_with_crds, get_overview_card_count, get_overview_card_target,
 };
 use crate::hooks::{
     ActivePortForward, FocusZone, ViewState, use_cluster, use_connect_cluster, use_focus,
@@ -31,9 +95,9 @@ use dioxus::prelude::*;
 use ks_kube::CrdInfo;
 use ks_kube::PermissionMode;
 use ks_kube::auth;
-use ks_plugin::PluginConfig;
+use ks_plugin::{KeyBindings, PluginConfig};
 use ks_state::Store;
-use lucide_dioxus::{ArrowRight, CircleX, CornerDownLeft, Loader, Moon, Sun, X};
+use lucide_dioxus::{ArrowRight, CircleX, CornerDownLeft, Loader, Moon, Settings, Sun, X};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -63,6 +127,7 @@ pub fn App() -> Element {
     let mut previous_view = use_signal(|| "overview".to_string());
     let mut loading = use_signal(|| true);
     let mut error_message = use_signal(|| None::<String>);
+    let mut plugin_error = use_signal(|| None::<String>);
     let mut available_contexts = use_signal(Vec::<Context>::new);
     let mut focus_search = use_signal(|| false);
     let mut search_is_focused = use_signal(|| false);
@@ -94,6 +159,9 @@ pub fn App() -> Element {
 
     // Help modal state
     let mut help_modal_open = use_signal(|| false);
+
+    // Keybindings modal state
+    let mut keybindings_modal_open = use_signal(|| false);
 
     // Theme state — class-based dark/light toggle
     let mut is_dark = use_signal(|| true);
@@ -222,6 +290,10 @@ pub fn App() -> Element {
 
     // Search state
     let search_term = use_signal(String::new);
+
+    // Sort state for resource list and node list
+    let sort_state = use_signal(SortState::default);
+    let node_sort_state = use_signal(NodeSortState::default);
 
     // Focus zone tracking
     let mut focus = use_focus();
@@ -411,10 +483,11 @@ pub fn App() -> Element {
     let onkeydown = move |e: KeyboardEvent| {
         let is_focused = search_is_focused();
 
-        // Map vim j/k to arrow keys, Ctrl+[ to Escape (VT100)
+        // Map vim j/k to arrow keys (only when no Ctrl/Alt/Meta held), Ctrl+[ to Escape (VT100)
+        let no_mods = !e.modifiers().ctrl() && !e.modifiers().alt() && !e.modifiers().meta();
         let effective_key = match &e.key() {
-            Key::Character(c) if c == "j" => Key::ArrowDown,
-            Key::Character(c) if c == "k" => Key::ArrowUp,
+            Key::Character(c) if c == "j" && no_mods => Key::ArrowDown,
+            Key::Character(c) if c == "k" && no_mods => Key::ArrowUp,
             Key::Character(c) if c == "[" && e.modifiers().ctrl() => Key::Escape,
             other => other.clone(),
         };
@@ -424,6 +497,7 @@ pub fn App() -> Element {
             || portforward_modal_open()
             || action_modal_open()
             || help_modal_open()
+            || keybindings_modal_open()
         {
             return;
         }
@@ -532,6 +606,22 @@ pub fn App() -> Element {
                     e.stop_propagation();
                     e.prevent_default();
                 }
+                Key::Tab => {
+                    // Tab-complete the current prediction
+                    let input = command_input.read().clone();
+                    if !input.is_empty()
+                        && let Some(alias) = plugin_config
+                            .read()
+                            .aliases
+                            .keys()
+                            .filter(|a| a.starts_with(&input))
+                            .min_by_key(|a| a.len())
+                    {
+                        command_input.set(alias.clone());
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
+                }
                 Key::Character(ref c) => {
                     // Append character to command input
                     let mut current = command_input.read().clone();
@@ -542,6 +632,7 @@ pub fn App() -> Element {
                 }
                 _ => {
                     e.stop_propagation();
+                    e.prevent_default();
                 }
             }
             return;
@@ -598,9 +689,15 @@ pub fn App() -> Element {
                         continue;
                     }
 
-                    // Build template context
+                    // Build template context — prefer global ns, fall back to resource's ns
+                    let ns = selected_namespace.read().clone().or_else(|| {
+                        selected_resource
+                            .read()
+                            .as_ref()
+                            .and_then(|r| r.namespace.clone())
+                    });
                     let ctx = ks_plugin::TemplateContext {
-                        namespace: selected_namespace.read().clone(),
+                        namespace: ns,
                         name: selected_resource.read().as_ref().map(|r| r.name.clone()),
                         kind: Some(current_kind.clone()),
                         context: cluster.read().as_ref().map(|c| c.context_name.clone()),
@@ -609,6 +706,7 @@ pub fn App() -> Element {
                     // Execute the hotkey command
                     if let Err(err) = ks_plugin::execute_hotkey(hotkey, &ctx) {
                         tracing::error!("Failed to execute custom hotkey: {}", err);
+                        plugin_error.set(Some(format!("Plugin hotkey failed: {}", err)));
                     }
                     e.stop_propagation();
                     e.prevent_default();
@@ -616,6 +714,23 @@ pub fn App() -> Element {
                 }
             }
         }
+
+        // When modifiers are held (Ctrl/Alt/Meta), the webview may report
+        // a control character instead of Key::Character (e.g. Ctrl+I → Tab,
+        // Ctrl+H → Backspace, Ctrl+B → '\x02'). Fall back to the physical
+        // key code so Ctrl+letter combos still reach the keybinding matcher.
+        let has_mods = e.modifiers().ctrl() || e.modifiers().alt() || e.modifiers().meta();
+        let is_control_char =
+            matches!(&effective_key, Key::Character(c) if c.chars().any(|ch| ch.is_control()));
+        let effective_key =
+            if has_mods && (!matches!(effective_key, Key::Character(_)) || is_control_char) {
+                match code_to_key_str(e.code()) {
+                    Some(s) => Key::Character(s),
+                    None => effective_key,
+                }
+            } else {
+                effective_key
+            };
 
         match effective_key {
             // Arrow Left = Navigate left (sidebar or overview cards)
@@ -873,508 +988,487 @@ pub fn App() -> Element {
                 e.stop_propagation();
                 e.prevent_default();
             }
-            // Ctrl+D = Delete with confirmation
-            Key::Character(ref c) if c == "d" && e.modifiers().ctrl() => {
-                if is_read_only() {
-                    tracing::warn!("Delete disabled in read-only mode (KUBESTUDIO_MODE=read)");
-                    e.stop_propagation();
-                    e.prevent_default();
-                    return;
-                }
-                if current_view.read().as_str() == "portforwards" {
-                    let idx_opt = *selected_index.read();
-                    if let Some(idx) = idx_opt {
-                        let forwards = port_forwards.read().list();
-                        if let Some(forward) = forwards.get(idx) {
-                            delete_target.set(Some(DeleteTarget {
-                                name: forward.id.clone(),
-                                namespace: Some(forward.namespace.clone()),
-                                kind: "PortForward".to_string(),
-                            }));
-                            is_force_delete.set(false);
-                            delete_modal_open.set(true);
-                        }
+            Key::Character(ref c) => {
+                let kb = &plugin_config.read().keybindings.clone();
+                let ctrl = e.modifiers().ctrl();
+                let shift = e.modifiers().shift();
+                let alt = e.modifiers().alt();
+                let meta = e.modifiers().meta();
+                let key = c.as_str();
+
+                if kb.matches("delete", key, ctrl, shift, alt, meta) {
+                    // Delete with confirmation
+                    if is_read_only() {
+                        tracing::warn!("Delete disabled in read-only mode (KUBESTUDIO_MODE=read)");
+                        e.stop_propagation();
+                        e.prevent_default();
+                        return;
                     }
-                } else if let Some(resource) = selected_resource.read().clone() {
-                    delete_target.set(Some(DeleteTarget {
-                        name: resource.name.clone(),
-                        namespace: resource.namespace.clone(),
-                        kind: current_kind.to_string(),
-                    }));
-                    is_force_delete.set(false);
-                    delete_modal_open.set(true);
-                }
-                e.stop_propagation();
-                e.prevent_default();
-            }
-            // Ctrl+K = Kill (force delete)
-            Key::Character(ref c) if c == "k" && e.modifiers().ctrl() => {
-                if is_read_only() {
-                    tracing::warn!(
-                        "Force delete disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                    );
+                    if current_view.read().as_str() == "portforwards" {
+                        let idx_opt = *selected_index.read();
+                        if let Some(idx) = idx_opt {
+                            let forwards = port_forwards.read().list();
+                            if let Some(forward) = forwards.get(idx) {
+                                delete_target.set(Some(DeleteTarget {
+                                    name: forward.id.clone(),
+                                    namespace: Some(forward.namespace.clone()),
+                                    kind: "PortForward".to_string(),
+                                }));
+                                is_force_delete.set(false);
+                                delete_modal_open.set(true);
+                            }
+                        }
+                    } else if let Some(resource) = selected_resource.read().clone() {
+                        delete_target.set(Some(DeleteTarget {
+                            name: resource.name.clone(),
+                            namespace: resource.namespace.clone(),
+                            kind: current_kind.to_string(),
+                        }));
+                        is_force_delete.set(false);
+                        delete_modal_open.set(true);
+                    }
                     e.stop_propagation();
                     e.prevent_default();
-                    return;
-                }
-                if let Some(resource) = selected_resource.read().clone() {
-                    delete_target.set(Some(DeleteTarget {
-                        name: resource.name.clone(),
-                        namespace: resource.namespace.clone(),
-                        kind: current_kind.to_string(),
-                    }));
-                    is_force_delete.set(true);
-                    delete_modal_open.set(true);
-                } else {
+                } else if kb.matches("force_delete", key, ctrl, shift, alt, meta) {
+                    // Kill (force delete)
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Force delete disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
+                        e.stop_propagation();
+                        e.prevent_default();
+                        return;
+                    }
+                    if let Some(resource) = selected_resource.read().clone() {
+                        delete_target.set(Some(DeleteTarget {
+                            name: resource.name.clone(),
+                            namespace: resource.namespace.clone(),
+                            kind: current_kind.to_string(),
+                        }));
+                        is_force_delete.set(true);
+                        delete_modal_open.set(true);
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("command_palette", key, ctrl, shift, alt, meta) {
                     command_palette_open.set(true);
-                }
-                e.stop_propagation();
-                e.prevent_default();
-            }
-            // Ctrl+O = Open file to apply (desktop only)
-            #[cfg(feature = "desktop")]
-            Key::Character(ref c) if c == "o" && e.modifiers().ctrl() => {
-                if is_read_only() {
-                    tracing::warn!(
-                        "Apply manifest disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                    );
                     e.stop_propagation();
                     e.prevent_default();
-                    return;
-                }
-                spawn(async move {
-                    if let Some(path) = rfd::AsyncFileDialog::new()
-                        .add_filter("YAML", &["yaml", "yml"])
-                        .add_filter("All files", &["*"])
-                        .pick_file()
-                        .await
+                } else if kb.matches("apply_manifest", key, ctrl, shift, alt, meta) {
+                    // Open file to apply (desktop only)
+                    #[cfg(feature = "desktop")]
                     {
-                        let path_str = path.path().to_string_lossy().to_string();
-                        nav.write().push(ViewState::ApplyFile { path: path_str });
-                    }
-                });
-                e.stop_propagation();
-                e.prevent_default();
-            }
-            // Ctrl+B = Toggle sidebar visibility
-            Key::Character(ref c) if c == "b" && e.modifiers().ctrl() => {
-                sidebar_visible.set(!sidebar_visible());
-                e.stop_propagation();
-                e.prevent_default();
-            }
-            Key::Character(ref c) if !e.modifiers().meta() && !e.modifiers().ctrl() => {
-                match c.as_str() {
-                    "o" | "0" => {
-                        current_view.set("overview".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "1" | "p" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("pods".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "2" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("deployments".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "3" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("services".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "N" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("nodes".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "v" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("events".to_string());
-                        nav.write().reset(ViewState::ResourceList);
-                        selected_index.set(None);
-                        selected_resource.set(None);
-                        e.stop_propagation();
-                    }
-                    "d" => {
-                        if let Some(resource) = selected_resource.read().clone() {
-                            let kind = current_kind.to_string();
-                            let name = resource.name.clone();
-                            let namespace = resource.namespace.clone();
-                            nav.write().push(ViewState::YamlViewer {
-                                kind,
-                                name,
-                                namespace,
-                            });
-                        }
-                        e.stop_propagation();
-                    }
-                    "c" => {
                         if is_read_only() {
                             tracing::warn!(
-                                "Create resource disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                                "Apply manifest disabled in read-only mode (KUBESTUDIO_MODE=read)"
                             );
-                        } else {
-                            nav.write().push(ViewState::CreateResource);
+                            e.stop_propagation();
+                            e.prevent_default();
+                            return;
                         }
-                        e.stop_propagation();
-                    }
-                    "l" => {
-                        let current_state = nav.read().current().clone();
-                        if let ViewState::ContainerDrillDown {
-                            pod_name,
-                            namespace,
-                        } = current_state
-                        {
-                            if let Some(container_idx) = *selected_container_index.read()
-                                && let Some(pod) = pods.read().items.iter().find(|p| {
-                                    p.metadata.name.as_ref() == Some(&pod_name)
-                                        && p.metadata.namespace.as_ref() == Some(&namespace)
-                                })
-                                && let Some(spec) = &pod.spec
-                                && let Some(container) = spec.containers.get(container_idx)
+                        spawn(async move {
+                            if let Some(path) = rfd::AsyncFileDialog::new()
+                                .add_filter("YAML", &["yaml", "yml"])
+                                .add_filter("All files", &["*"])
+                                .pick_file()
+                                .await
                             {
-                                nav.write().push(ViewState::LogViewer {
-                                    pod_name: pod_name.clone(),
-                                    namespace: namespace.clone(),
-                                    container: Some(container.name.clone()),
-                                });
+                                let path_str = path.path().to_string_lossy().to_string();
+                                nav.write().push(ViewState::ApplyFile { path: path_str });
                             }
-                        } else if current_view.read().as_str() == "pods"
-                            && let Some(resource) = selected_resource.read().clone()
-                            && let Some(ns) = resource.namespace.clone()
+                        });
+                    }
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("toggle_sidebar", key, ctrl, shift, alt, meta) {
+                    sidebar_visible.set(!sidebar_visible());
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("overview", key, ctrl, shift, alt, meta)
+                    || (!meta && !ctrl && key == "0")
+                {
+                    current_view.set("overview".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("pods", key, ctrl, shift, alt, meta)
+                    || (!meta && !ctrl && key == "1")
+                {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("pods".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("deployments", key, ctrl, shift, alt, meta) {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("deployments".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("services", key, ctrl, shift, alt, meta) {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("services".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("nodes", key, ctrl, shift, alt, meta) {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("nodes".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("events", key, ctrl, shift, alt, meta) {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("events".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    selected_index.set(None);
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("describe", key, ctrl, shift, alt, meta) {
+                    if let Some(resource) = selected_resource.read().clone() {
+                        let kind = current_kind.to_string();
+                        let name = resource.name.clone();
+                        let namespace = resource.namespace.clone();
+                        nav.write().push(ViewState::YamlViewer {
+                            kind,
+                            name,
+                            namespace,
+                        });
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("create_resource", key, ctrl, shift, alt, meta) {
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Create resource disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
+                    } else {
+                        nav.write().push(ViewState::CreateResource);
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("logs", key, ctrl, shift, alt, meta) {
+                    let current_state = nav.read().current().clone();
+                    if let ViewState::ContainerDrillDown {
+                        pod_name,
+                        namespace,
+                    } = current_state
+                    {
+                        if let Some(container_idx) = *selected_container_index.read()
+                            && let Some(pod) = pods.read().items.iter().find(|p| {
+                                p.metadata.name.as_ref() == Some(&pod_name)
+                                    && p.metadata.namespace.as_ref() == Some(&namespace)
+                            })
+                            && let Some(spec) = &pod.spec
+                            && let Some(container) = spec.containers.get(container_idx)
                         {
                             nav.write().push(ViewState::LogViewer {
+                                pod_name: pod_name.clone(),
+                                namespace: namespace.clone(),
+                                container: Some(container.name.clone()),
+                            });
+                        }
+                    } else if current_view.read().as_str() == "pods"
+                        && let Some(resource) = selected_resource.read().clone()
+                        && let Some(ns) = resource.namespace.clone()
+                    {
+                        nav.write().push(ViewState::LogViewer {
+                            pod_name: resource.name.clone(),
+                            namespace: ns,
+                            container: None,
+                        });
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("shell", key, ctrl, shift, alt, meta) {
+                    let current_state = nav.read().current().clone();
+                    if let ViewState::ContainerDrillDown {
+                        pod_name,
+                        namespace,
+                    } = current_state
+                    {
+                        // Exec into container - requires write permissions
+                        if is_read_only() {
+                            tracing::warn!(
+                                "Shell/exec disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                            );
+                        } else if let Some(container_idx) = *selected_container_index.read()
+                            && let Some(pod) = pods.read().items.iter().find(|p| {
+                                p.metadata.name.as_ref() == Some(&pod_name)
+                                    && p.metadata.namespace.as_ref() == Some(&namespace)
+                            })
+                            && let Some(spec) = &pod.spec
+                            && let Some(container) = spec.containers.get(container_idx)
+                        {
+                            nav.write().push(ViewState::ExecViewer {
+                                pod_name: pod_name.clone(),
+                                namespace: namespace.clone(),
+                                container: Some(container.name.clone()),
+                            });
+                        }
+                    } else if current_view.read().as_str() == "pods" {
+                        // Exec into pod - requires write permissions
+                        if is_read_only() {
+                            tracing::warn!(
+                                "Shell/exec disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                            );
+                        } else if let Some(resource) = selected_resource.read().clone()
+                            && let Some(ns) = resource.namespace.clone()
+                        {
+                            nav.write().push(ViewState::ExecViewer {
                                 pod_name: resource.name.clone(),
                                 namespace: ns,
                                 container: None,
                             });
                         }
-                        e.stop_propagation();
-                    }
-                    "s" => {
-                        let current_state = nav.read().current().clone();
-                        if let ViewState::ContainerDrillDown {
-                            pod_name,
-                            namespace,
-                        } = current_state
-                        {
-                            // Exec into container - requires write permissions
-                            if is_read_only() {
-                                tracing::warn!(
-                                    "Shell/exec disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                                );
-                            } else if let Some(container_idx) = *selected_container_index.read()
-                                && let Some(pod) = pods.read().items.iter().find(|p| {
-                                    p.metadata.name.as_ref() == Some(&pod_name)
-                                        && p.metadata.namespace.as_ref() == Some(&namespace)
-                                })
-                                && let Some(spec) = &pod.spec
-                                && let Some(container) = spec.containers.get(container_idx)
-                            {
-                                nav.write().push(ViewState::ExecViewer {
-                                    pod_name: pod_name.clone(),
-                                    namespace: namespace.clone(),
-                                    container: Some(container.name.clone()),
-                                });
-                            }
-                        } else if current_view.read().as_str() == "pods" {
-                            // Exec into pod - requires write permissions
-                            if is_read_only() {
-                                tracing::warn!(
-                                    "Shell/exec disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                                );
-                            } else if let Some(resource) = selected_resource.read().clone()
-                                && let Some(ns) = resource.namespace.clone()
-                            {
-                                nav.write().push(ViewState::ExecViewer {
-                                    pod_name: resource.name.clone(),
-                                    namespace: ns,
-                                    container: None,
-                                });
-                            }
-                        } else {
-                            // Navigate to services - always allowed
-                            current_view.set("services".to_string());
-                            nav.write().reset(ViewState::ResourceList);
-                            selected_index.set(None);
-                            selected_resource.set(None);
-                        }
-                        e.stop_propagation();
-                    }
-                    "f" => {
-                        if is_read_only() {
-                            tracing::warn!(
-                                "Port forward disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                            );
-                            e.stop_propagation();
-                            return;
-                        }
-                        if current_view.read().as_str() == "pods"
-                            && let Some(resource) = selected_resource.read().clone()
-                            && let Some(ns) = resource.namespace.clone()
-                        {
-                            let container_ports: Vec<(u16, Option<String>, String)> = pods
-                                .read()
-                                .items
-                                .iter()
-                                .find(|p| p.metadata.name.as_ref() == Some(&resource.name))
-                                .and_then(|p| p.spec.as_ref())
-                                .map(|spec| {
-                                    spec.containers
-                                        .iter()
-                                        .flat_map(|c| {
-                                            c.ports
-                                                .as_ref()
-                                                .map(|ports| {
-                                                    ports
-                                                        .iter()
-                                                        .map(|p| {
-                                                            (
-                                                                p.container_port as u16,
-                                                                p.name.clone(),
-                                                                p.protocol.clone().unwrap_or_else(
-                                                                    || "TCP".to_string(),
-                                                                ),
-                                                            )
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                })
-                                                .unwrap_or_default()
-                                        })
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-
-                            portforward_target.set(Some((
-                                resource.name.clone(),
-                                ns,
-                                container_ports,
-                            )));
-                            portforward_modal_open.set(true);
-                        }
-                        e.stop_propagation();
-                    }
-                    "/" => {
-                        focus_search.set(true);
-                        e.stop_propagation();
-                        e.prevent_default();
-                    }
-                    ":" => {
-                        // Open command mode (k9s-style alias input)
-                        command_mode_open.set(true);
-                        command_input.set(String::new());
-                        e.stop_propagation();
-                        e.prevent_default();
-                    }
-                    "F" => {
-                        previous_view.set(current_view.read().clone());
-                        current_view.set("portforwards".to_string());
+                    } else {
+                        // Navigate to services - always allowed
+                        current_view.set("services".to_string());
                         nav.write().reset(ViewState::ResourceList);
-                        if port_forwards.read().count() > 0 {
-                            selected_index.set(Some(0));
-                        } else {
-                            selected_index.set(None);
-                        }
+                        selected_index.set(None);
                         selected_resource.set(None);
-                        e.stop_propagation();
                     }
-                    "n" => {
-                        namespace_selector_focused.set(true);
+                    e.stop_propagation();
+                } else if kb.matches("port_forward", key, ctrl, shift, alt, meta) {
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Port forward disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
                         e.stop_propagation();
+                        return;
                     }
-                    "?" => {
-                        help_modal_open.set(true);
-                        e.stop_propagation();
-                    }
-                    "C" => {
-                        // Shift+C toggles chat panel (only when AI is enabled and authenticated)
-                        if ai_enabled() && !matrix_auth_token.read().is_empty() {
-                            chat_panel_open.set(!chat_panel_open());
-                        }
-                        e.stop_propagation();
-                    }
-                    "+" | "=" => {
-                        if is_read_only() {
-                            tracing::warn!(
-                                "Scale up disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                            );
-                            e.stop_propagation();
-                            return;
-                        }
-                        if current_view.read().as_str() == "deployments"
-                            && let Some(resource) = selected_resource.read().clone()
-                            && let Some(ns) = resource.namespace.clone()
-                            && let Some(ctx) = cluster.read().clone()
-                        {
-                            let name = resource.name.clone();
-                            spawn(async move {
-                                match ctx.client.get_deployment_replicas(&name, &ns).await {
-                                    Ok(current) => {
-                                        let new_replicas = current + 1;
-                                        match ctx
-                                            .client
-                                            .scale_deployment(&name, &ns, new_replicas)
-                                            .await
-                                        {
-                                            Ok(replicas) => {
-                                                tracing::info!(
-                                                    "Scaled {} to {} replicas",
-                                                    name,
-                                                    replicas
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::error!("Failed to scale {}: {}", name, e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Failed to get replicas for {}: {}",
-                                            name,
-                                            e
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                        e.stop_propagation();
-                    }
-                    "-" => {
-                        if is_read_only() {
-                            tracing::warn!(
-                                "Scale down disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                            );
-                            e.stop_propagation();
-                            return;
-                        }
-                        if current_view.read().as_str() == "deployments"
-                            && let Some(resource) = selected_resource.read().clone()
-                            && let Some(ns) = resource.namespace.clone()
-                            && let Some(ctx) = cluster.read().clone()
-                        {
-                            let name = resource.name.clone();
-                            spawn(async move {
-                                match ctx.client.get_deployment_replicas(&name, &ns).await {
-                                    Ok(current) => {
-                                        let new_replicas = (current - 1).max(0);
-                                        match ctx
-                                            .client
-                                            .scale_deployment(&name, &ns, new_replicas)
-                                            .await
-                                        {
-                                            Ok(replicas) => {
-                                                tracing::info!(
-                                                    "Scaled {} to {} replicas",
-                                                    name,
-                                                    replicas
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::error!("Failed to scale {}: {}", name, e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Failed to get replicas for {}: {}",
-                                            name,
-                                            e
-                                        );
-                                    }
-                                }
-                            });
-                        }
-                        e.stop_propagation();
-                    }
-                    "R" => {
-                        if is_read_only() {
-                            tracing::warn!(
-                                "Restart disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                            );
-                            e.stop_propagation();
-                            return;
-                        }
-                        let view = current_view.read().clone();
-                        let kind = match view.as_str() {
-                            "deployments" => Some("Deployment"),
-                            "statefulsets" => Some("StatefulSet"),
-                            "daemonsets" => Some("DaemonSet"),
-                            _ => None,
-                        };
-                        if let Some(kind_str) = kind
-                            && let Some(resource) = selected_resource.read().clone()
-                        {
-                            action_target.set(Some(ActionTarget {
-                                name: resource.name.clone(),
-                                namespace: resource.namespace.clone(),
-                                kind: kind_str.to_string(),
-                            }));
-                            action_modal_type.set(ActionType::Restart);
-                            action_modal_open.set(true);
-                        }
-                        e.stop_propagation();
-                    }
-                    "T" => {
-                        if is_read_only() {
-                            tracing::warn!(
-                                "Trigger cronjob disabled in read-only mode (KUBESTUDIO_MODE=read)"
-                            );
-                            e.stop_propagation();
-                            return;
-                        }
-                        if current_view.read().as_str() == "cronjobs"
-                            && let Some(resource) = selected_resource.read().clone()
-                        {
-                            action_target.set(Some(ActionTarget {
-                                name: resource.name.clone(),
-                                namespace: resource.namespace.clone(),
-                                kind: "CronJob".to_string(),
-                            }));
-                            action_modal_type.set(ActionType::Trigger);
-                            action_modal_open.set(true);
-                        }
-                        e.stop_propagation();
-                    }
-                    // Check plugin aliases for resource navigation
-                    alias => {
-                        if let Some(target) = plugin_config.read().resolve_alias(alias) {
-                            // Navigate to the aliased resource
-                            previous_view.set(current_view.read().clone());
-                            current_view.set(target.clone());
-                            nav.write().reset(ViewState::ResourceList);
-                            selected_index.set(None);
-                            selected_resource.set(None);
-                            // Update selected_crd if navigating to a CRD
-                            if let Some(crd_name) = target.strip_prefix("crd:") {
-                                let crd = crd_state
-                                    .read()
-                                    .crds
+                    if current_view.read().as_str() == "pods"
+                        && let Some(resource) = selected_resource.read().clone()
+                        && let Some(ns) = resource.namespace.clone()
+                    {
+                        let container_ports: Vec<(u16, Option<String>, String)> = pods
+                            .read()
+                            .items
+                            .iter()
+                            .find(|p| p.metadata.name.as_ref() == Some(&resource.name))
+                            .and_then(|p| p.spec.as_ref())
+                            .map(|spec| {
+                                spec.containers
                                     .iter()
-                                    .find(|c| c.name == crd_name)
-                                    .cloned();
-                                selected_crd.set(crd);
-                            } else {
-                                selected_crd.set(None);
+                                    .flat_map(|c| {
+                                        c.ports
+                                            .as_ref()
+                                            .map(|ports| {
+                                                ports
+                                                    .iter()
+                                                    .map(|p| {
+                                                        (
+                                                            p.container_port as u16,
+                                                            p.name.clone(),
+                                                            p.protocol.clone().unwrap_or_else(
+                                                                || "TCP".to_string(),
+                                                            ),
+                                                        )
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default()
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        portforward_target.set(Some((resource.name.clone(), ns, container_ports)));
+                        portforward_modal_open.set(true);
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("search", key, ctrl, shift, alt, meta) {
+                    focus_search.set(true);
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("command_mode", key, ctrl, shift, alt, meta) {
+                    // Open command mode (k9s-style alias input)
+                    command_mode_open.set(true);
+                    command_input.set(String::new());
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("port_forwards", key, ctrl, shift, alt, meta) {
+                    previous_view.set(current_view.read().clone());
+                    current_view.set("portforwards".to_string());
+                    nav.write().reset(ViewState::ResourceList);
+                    if port_forwards.read().count() > 0 {
+                        selected_index.set(Some(0));
+                    } else {
+                        selected_index.set(None);
+                    }
+                    selected_resource.set(None);
+                    e.stop_propagation();
+                } else if kb.matches("namespace", key, ctrl, shift, alt, meta) {
+                    namespace_selector_focused.set(true);
+                    e.stop_propagation();
+                } else if kb.matches("help", key, ctrl, shift, alt, meta) {
+                    help_modal_open.set(true);
+                    e.stop_propagation();
+                } else if kb.matches("settings", key, ctrl, shift, alt, meta) {
+                    keybindings_modal_open.set(true);
+                    e.stop_propagation();
+                    e.prevent_default();
+                } else if kb.matches("toggle_chat", key, ctrl, shift, alt, meta) {
+                    // Toggle chat panel (only when AI is enabled and authenticated)
+                    if ai_enabled() && !matrix_auth_token.read().is_empty() {
+                        chat_panel_open.set(!chat_panel_open());
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("scale_up", key, ctrl, shift, alt, meta)
+                    || (!meta && !ctrl && key == "=")
+                {
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Scale up disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
+                        e.stop_propagation();
+                        return;
+                    }
+                    if current_view.read().as_str() == "deployments"
+                        && let Some(resource) = selected_resource.read().clone()
+                        && let Some(ns) = resource.namespace.clone()
+                        && let Some(ctx) = cluster.read().clone()
+                    {
+                        let name = resource.name.clone();
+                        spawn(async move {
+                            match ctx.client.get_deployment_replicas(&name, &ns).await {
+                                Ok(current) => {
+                                    let new_replicas = current + 1;
+                                    match ctx
+                                        .client
+                                        .scale_deployment(&name, &ns, new_replicas)
+                                        .await
+                                    {
+                                        Ok(replicas) => {
+                                            tracing::info!(
+                                                "Scaled {} to {} replicas",
+                                                name,
+                                                replicas
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to scale {}: {}", name, e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to get replicas for {}: {}", name, e);
+                                }
                             }
-                            e.stop_propagation();
+                        });
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("scale_down", key, ctrl, shift, alt, meta) {
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Scale down disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
+                        e.stop_propagation();
+                        return;
+                    }
+                    if current_view.read().as_str() == "deployments"
+                        && let Some(resource) = selected_resource.read().clone()
+                        && let Some(ns) = resource.namespace.clone()
+                        && let Some(ctx) = cluster.read().clone()
+                    {
+                        let name = resource.name.clone();
+                        spawn(async move {
+                            match ctx.client.get_deployment_replicas(&name, &ns).await {
+                                Ok(current) => {
+                                    let new_replicas = (current - 1).max(0);
+                                    match ctx
+                                        .client
+                                        .scale_deployment(&name, &ns, new_replicas)
+                                        .await
+                                    {
+                                        Ok(replicas) => {
+                                            tracing::info!(
+                                                "Scaled {} to {} replicas",
+                                                name,
+                                                replicas
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to scale {}: {}", name, e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to get replicas for {}: {}", name, e);
+                                }
+                            }
+                        });
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("restart", key, ctrl, shift, alt, meta) {
+                    if is_read_only() {
+                        tracing::warn!("Restart disabled in read-only mode (KUBESTUDIO_MODE=read)");
+                        e.stop_propagation();
+                        return;
+                    }
+                    let view = current_view.read().clone();
+                    let kind = match view.as_str() {
+                        "deployments" => Some("Deployment"),
+                        "statefulsets" => Some("StatefulSet"),
+                        "daemonsets" => Some("DaemonSet"),
+                        _ => None,
+                    };
+                    if let Some(kind_str) = kind
+                        && let Some(resource) = selected_resource.read().clone()
+                    {
+                        action_target.set(Some(ActionTarget {
+                            name: resource.name.clone(),
+                            namespace: resource.namespace.clone(),
+                            kind: kind_str.to_string(),
+                        }));
+                        action_modal_type.set(ActionType::Restart);
+                        action_modal_open.set(true);
+                    }
+                    e.stop_propagation();
+                } else if kb.matches("trigger", key, ctrl, shift, alt, meta) {
+                    if is_read_only() {
+                        tracing::warn!(
+                            "Trigger cronjob disabled in read-only mode (KUBESTUDIO_MODE=read)"
+                        );
+                        e.stop_propagation();
+                        return;
+                    }
+                    if current_view.read().as_str() == "cronjobs"
+                        && let Some(resource) = selected_resource.read().clone()
+                    {
+                        action_target.set(Some(ActionTarget {
+                            name: resource.name.clone(),
+                            namespace: resource.namespace.clone(),
+                            kind: "CronJob".to_string(),
+                        }));
+                        action_modal_type.set(ActionType::Trigger);
+                        action_modal_open.set(true);
+                    }
+                    e.stop_propagation();
+                } else {
+                    // Check plugin aliases for resource navigation
+                    if let Some(target) = plugin_config.read().resolve_alias(key) {
+                        // Navigate to the aliased resource
+                        previous_view.set(current_view.read().clone());
+                        current_view.set(target.clone());
+                        nav.write().reset(ViewState::ResourceList);
+                        selected_index.set(None);
+                        selected_resource.set(None);
+                        // Update selected_crd if navigating to a CRD
+                        if let Some(crd_name) = target.strip_prefix("crd:") {
+                            let crd = crd_state
+                                .read()
+                                .crds
+                                .iter()
+                                .find(|c| c.name == crd_name)
+                                .cloned();
+                            selected_crd.set(crd);
+                        } else {
+                            selected_crd.set(None);
                         }
+                        e.stop_propagation();
                     }
                 }
             }
@@ -1557,6 +1651,7 @@ pub fn App() -> Element {
         is_statefulsets_view,
         is_daemonsets_view,
         is_cronjobs_view,
+        &plugin_config.read().keybindings,
     );
 
     // Convert resources to items for display (uses extracted resource_items module)
@@ -1688,6 +1783,15 @@ pub fn App() -> Element {
             }
 
             main { class: "main-content",
+                // Plugin error toast (dismissible, shown above top bar)
+                if let Some(err) = plugin_error.read().clone() {
+                    div {
+                        class: "plugin-error-toast",
+                        onclick: move |_| plugin_error.set(None),
+                        span { "{err}" }
+                        span { class: "plugin-error-dismiss", "  ✕" }
+                    }
+                }
                 // Top bar: hotkeys on left, action buttons on right
                 div { class: "top-bar",
                     HotkeysBar {
@@ -1707,6 +1811,17 @@ pub fn App() -> Element {
                                 }
                             }
                         }
+                        {
+                            let settings_key = plugin_config.read().keybindings.display("settings").to_string();
+                            rsx! {
+                                button {
+                                    class: "sidebar-theme-btn",
+                                    title: "Settings ({settings_key})",
+                                    onclick: move |_| keybindings_modal_open.set(true),
+                                    Settings { size: 16 }
+                                }
+                            }
+                        }
                         // AI buttons — only when AI is enabled
                         if ai_enabled() {
                             {
@@ -1717,7 +1832,7 @@ pub fn App() -> Element {
                                     button {
                                         class: "{btn_class}",
                                         disabled: disabled,
-                                        title: "Agent Chat (Shift+C){title_suffix}",
+                                        title: format!("Agent Chat ({}){}", plugin_config.read().keybindings.display("toggle_chat"), title_suffix),
                                         onclick: move |_| {
                                             if !disabled {
                                                 chat_panel_open.set(!chat_panel_open());
@@ -1788,6 +1903,7 @@ pub fn App() -> Element {
                                 cluster: cluster,
                                 crd_info: crd_info_for_viewer,
                                 read_only: is_read_only_mode,
+                                keybindings: plugin_config.read().keybindings.clone(),
                                 on_back: move |_| {
                                     // Pop the navigation stack
                                     nav.write().pop();
@@ -1806,6 +1922,7 @@ pub fn App() -> Element {
                     CreateResource {
                         cluster: cluster,
                         namespace: selected_namespace.read().clone(),
+                        keybindings: plugin_config.read().keybindings.clone(),
                         on_close: move |_| {
                             // Pop the navigation stack
                             nav.write().pop();
@@ -1822,6 +1939,7 @@ pub fn App() -> Element {
                     ApplyManifest {
                         cluster: cluster,
                         source: ApplySource::File(path),
+                        keybindings: plugin_config.read().keybindings.clone(),
                         on_close: move |_| {
                             nav.write().pop();
                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -1878,6 +1996,7 @@ pub fn App() -> Element {
                                     forwards: forwards_list,
                                     selected_index: *selected_index.read(),
                                     is_focused: list_is_focused,
+                                    keybindings: plugin_config.read().keybindings.clone(),
                                     on_select: move |forward: ActivePortForward| {
                                         // Could navigate to the pod
                                         tracing::info!("Selected forward: {}", forward.id);
@@ -1930,6 +2049,7 @@ pub fn App() -> Element {
                                             namespace: namespace,
                                             container: container,
                                             cluster: cluster,
+                                            keybindings: plugin_config.read().keybindings.clone(),
                                             on_back: move |_| {
                                                 // Pop the navigation stack
                                                 nav.write().pop();
@@ -1972,6 +2092,7 @@ pub fn App() -> Element {
                                             app_container_ref: Some(app_container_ref),
                                             selected_index: Some(selected_index),
                                             search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                             on_select: move |item: ResourceItem| {
                                                 selected_resource.set(Some(item.clone()));
                                                 // Drill down to container selection
@@ -2053,6 +2174,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2092,6 +2214,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to deployment's pods
@@ -2170,6 +2293,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2209,6 +2333,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to service endpoints
@@ -2288,6 +2413,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2327,6 +2453,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to statefulset's pods
@@ -2406,6 +2533,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2445,6 +2573,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to daemonset's pods
@@ -2524,6 +2653,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2563,6 +2693,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to job's pods
@@ -2667,6 +2798,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2706,6 +2838,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to cronjob's jobs
@@ -2732,6 +2865,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2748,6 +2882,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2764,6 +2899,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2780,6 +2916,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2796,6 +2933,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2864,6 +3002,7 @@ pub fn App() -> Element {
                                         namespace: namespace,
                                         container: container,
                                         cluster: cluster,
+                                        keybindings: plugin_config.read().keybindings.clone(),
                                         on_back: move |_| {
                                             nav.write().pop();
                                             if let Some(app_ref) = app_container_ref.read().clone() {
@@ -2903,6 +3042,7 @@ pub fn App() -> Element {
                                         app_container_ref: Some(app_container_ref),
                                         selected_index: Some(selected_index),
                                         search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                         on_select: move |item: ResourceItem| {
                                             selected_resource.set(Some(item.clone()));
                                             // Drill down to PVC's pods
@@ -2929,6 +3069,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2950,6 +3091,7 @@ pub fn App() -> Element {
                                     is_focused: list_is_focused,
                                     metrics: metrics_map,
                                     metrics_available: metrics_available,
+                                    sort_state: Some(node_sort_state),
                                     on_select: move |node: k8s_openapi::api::core::v1::Node| {
                                         let name = node.metadata.name.clone().unwrap_or_default();
                                         selected_resource.set(Some(ResourceItem {
@@ -2957,6 +3099,7 @@ pub fn App() -> Element {
                                             namespace: None,
                                             status: "Node".to_string(),
                                             age: String::new(),
+                                            age_seconds: None,
                                             ready: None,
                                             restarts: None,
                                         }));
@@ -2978,6 +3121,7 @@ pub fn App() -> Element {
                                 app_container_ref: Some(app_container_ref),
                                 selected_index: Some(selected_index),
                                 search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                 on_select: move |item: ResourceItem| {
                                     selected_resource.set(Some(item.clone()));
                                 },
@@ -2996,6 +3140,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3015,6 +3160,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3034,6 +3180,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3053,6 +3200,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3077,6 +3225,7 @@ pub fn App() -> Element {
                                     app_container_ref: Some(app_container_ref),
                                     selected_index: Some(selected_index),
                                     search_term: Some(search_term),
+                                sort_state: Some(sort_state),
                                     on_select: move |item: ResourceItem| {
                                         selected_resource.set(Some(item.clone()));
                                     },
@@ -3148,6 +3297,8 @@ pub fn App() -> Element {
                             .collect()
                     };
 
+                    let prediction_for_tab = prediction.clone();
+
                     rsx! {
                         div {
                             class: "command-mode-bar",
@@ -3155,6 +3306,7 @@ pub fn App() -> Element {
                             input {
                                 class: "command-mode-input-capture",
                                 r#type: "text",
+                                value: "{input}",
                                 autofocus: true,
                                 onmounted: move |e| {
                                     let data = e.data();
@@ -3166,7 +3318,13 @@ pub fn App() -> Element {
                                     command_input.set(e.value().clone());
                                 },
                                 onkeydown: move |e: KeyboardEvent| {
-                                    if is_escape(&e) {
+                                    if e.key() == Key::Tab {
+                                        e.prevent_default();
+                                        e.stop_propagation();
+                                        if let Some((alias, _)) = &prediction_for_tab {
+                                            command_input.set(alias.clone());
+                                        }
+                                    } else if is_escape(&e) {
                                         command_mode_open.set(false);
                                         command_input.set(String::new());
                                         if let Some(app_ref) = app_container_ref.read().clone() {
@@ -3251,7 +3409,7 @@ pub fn App() -> Element {
                                 }
                             }
                             span { class: "command-mode-hint",
-                                "Enter " CornerDownLeft { size: 14 } "  Esc " X { size: 14 }
+                                "Tab ⇥  Enter " CornerDownLeft { size: 14 } "  Esc " X { size: 14 }
                             }
                         }
                     }
@@ -3261,7 +3419,15 @@ pub fn App() -> Element {
             CommandPalette {
                 open: command_palette_open(),
                 commands: commands,
-                on_close: move |_| command_palette_open.set(false),
+                on_close: move |_| {
+                    command_palette_open.set(false);
+                    // Refocus the app container so keyboard shortcuts work immediately
+                    if let Some(app_ref) = app_container_ref.read().clone() {
+                        spawn(async move {
+                            let _ = app_ref.set_focus(true).await;
+                        });
+                    }
+                },
                 on_select: move |cmd_id: String| {
                     tracing::info!("Command selected: {}", cmd_id);
 
@@ -3269,14 +3435,37 @@ pub fn App() -> Element {
                     if let Some(tool_name) = cmd_id.strip_prefix("tool:") {
                         let config = plugin_config.read();
                         if let Some(tool) = config.tools.iter().find(|t| t.name == tool_name) {
+                            let kind = match current_view.read().as_str() {
+                                "pods" => Some("Pod".to_string()),
+                                "deployments" => Some("Deployment".to_string()),
+                                "services" => Some("Service".to_string()),
+                                "statefulsets" => Some("StatefulSet".to_string()),
+                                "daemonsets" => Some("DaemonSet".to_string()),
+                                "jobs" => Some("Job".to_string()),
+                                "cronjobs" => Some("CronJob".to_string()),
+                                "configmaps" => Some("ConfigMap".to_string()),
+                                "secrets" => Some("Secret".to_string()),
+                                "endpoints" => Some("Endpoints".to_string()),
+                                "ingresses" => Some("Ingress".to_string()),
+                                "nodes" => Some("Node".to_string()),
+                                "events" => Some("Event".to_string()),
+                                v if v.starts_with("crd:") => selected_crd.read().as_ref().map(|c| c.kind.clone()),
+                                _ => None,
+                            };
+                            // Use the global namespace filter, or fall back to the
+                            // selected resource's own namespace (for "All Namespaces" mode)
+                            let ns = selected_namespace.read().clone().or_else(|| {
+                                selected_resource.read().as_ref().and_then(|r| r.namespace.clone())
+                            });
                             let ctx = ks_plugin::TemplateContext {
-                                namespace: selected_namespace.read().clone(),
+                                namespace: ns,
                                 name: selected_resource.read().as_ref().map(|r| r.name.clone()),
-                                kind: None,
+                                kind,
                                 context: cluster.read().as_ref().map(|c| c.context_name.clone()),
                             };
                             if let Err(err) = ks_plugin::execute_tool(tool, &ctx) {
                                 tracing::error!("Failed to launch tool {}: {}", tool_name, err);
+                                plugin_error.set(Some(format!("Failed to launch {}: {}", tool_name, err)));
                             }
                         }
                         return;
@@ -3661,75 +3850,110 @@ pub fn App() -> Element {
                             e.prevent_default();
                         }
                     },
-                    div {
-                        class: "help-modal",
-                        onclick: move |e| e.stop_propagation(),
-                        h2 { "Keyboard Shortcuts" }
+                    {
+                        let kb = plugin_config.read().keybindings.clone();
+                        rsx! {
+                            div {
+                                class: "help-modal",
+                                onclick: move |e| e.stop_propagation(),
+                                h2 { "Keyboard Shortcuts" }
 
-                        div { class: "help-columns",
-                            div { class: "help-column",
-                                div { class: "help-section",
-                                    h3 { "Navigation" }
-                                    div { class: "help-row", kbd { "o" } span { "Overview" } }
-                                    div { class: "help-row", kbd { "p" } span { "Pods" } }
-                                    div { class: "help-row", kbd { "d" } span { "Deployments" } }
-                                    div { class: "help-row", kbd { "s" } span { "Services" } }
-                                    div { class: "help-row", kbd { "v" } span { "Events" } }
-                                    div { class: "help-row", kbd { "N" } span { "Nodes" } }
+                                div { class: "help-columns",
+                                    div { class: "help-column",
+                                        div { class: "help-section",
+                                            h3 { "Navigation" }
+                                            div { class: "help-row", kbd { {kb.display("overview").to_string()} } span { "Overview" } }
+                                            div { class: "help-row", kbd { {kb.display("pods").to_string()} } span { "Pods" } }
+                                            div { class: "help-row", kbd { {kb.display("deployments").to_string()} } span { "Deployments" } }
+                                            div { class: "help-row", kbd { {kb.display("services").to_string()} } span { "Services" } }
+                                            div { class: "help-row", kbd { {kb.display("events").to_string()} } span { "Events" } }
+                                            div { class: "help-row", kbd { {kb.display("nodes").to_string()} } span { "Nodes" } }
+                                        }
+
+                                        div { class: "help-section",
+                                            h3 { "Movement" }
+                                            div { class: "help-row", kbd { "↑↓" } span { "Navigate list" } }
+                                            div { class: "help-row", kbd { "j/k" } span { "Navigate (vim)" } }
+                                            div { class: "help-row", kbd { "←→" } span { "Sidebar / Main" } }
+                                            div { class: "help-row", kbd { "Enter" } span { "Select / Drill down" } }
+                                            div { class: "help-row", kbd { "Esc" } span { "Back / Close" } }
+                                        }
+
+                                        div { class: "help-section",
+                                            h3 { "General" }
+                                            div { class: "help-row", kbd { {kb.display("search").to_string()} } span { "Search" } }
+                                            div { class: "help-row", kbd { {kb.display("namespace").to_string()} } span { "Namespace selector" } }
+                                            div { class: "help-row", kbd { {kb.display("toggle_sidebar").to_string()} } span { "Toggle sidebar" } }
+                                            div { class: "help-row", kbd { {kb.display("command_palette").to_string()} } span { "Command palette" } }
+                                            div { class: "help-row", kbd { {kb.display("help").to_string()} } span { "This help" } }
+                                        }
+                                    }
+
+                                    div { class: "help-column",
+                                        div { class: "help-section",
+                                            h3 { "Resources" }
+                                            div { class: "help-row", kbd { {kb.display("describe").to_string()} } span { "Describe / YAML" } }
+                                            div { class: "help-row", kbd { {kb.display("create_resource").to_string()} } span { "Create resource" } }
+                                            div { class: "help-row", kbd { {kb.display("apply_manifest").to_string()} } span { "Apply manifest" } }
+                                            div { class: "help-row", kbd { {kb.display("delete").to_string()} } span { "Delete" } }
+                                            div { class: "help-row", kbd { {kb.display("force_delete").to_string()} } span { "Force delete" } }
+                                        }
+
+                                        div { class: "help-section",
+                                            h3 { "Pods" }
+                                            div { class: "help-row", kbd { {kb.display("logs").to_string()} } span { "View logs" } }
+                                            div { class: "help-row", kbd { {kb.display("shell").to_string()} } span { "Shell / Exec" } }
+                                            div { class: "help-row", kbd { {kb.display("port_forward").to_string()} } span { "Port forward" } }
+                                            div { class: "help-row", kbd { {kb.display("port_forwards").to_string()} } span { "View port forwards" } }
+                                            div { class: "help-row", kbd { {kb.display("toggle_wrap").to_string()} } span { "Toggle line wrap" } }
+                                            div { class: "help-row", kbd { {kb.display("reveal_secrets").to_string()} } span { "Reveal secrets" } }
+                                        }
+
+                                        div { class: "help-section",
+                                            h3 { "Workloads" }
+                                            div { class: "help-row", kbd { {format!("{}/{}", kb.display("scale_up"), kb.display("scale_down"))} } span { "Scale replicas" } }
+                                            div { class: "help-row", kbd { {kb.display("restart").to_string()} } span { "Restart rollout" } }
+                                            div { class: "help-row", kbd { {kb.display("trigger").to_string()} } span { "Trigger job" } }
+                                        }
+                                    }
                                 }
 
-                                div { class: "help-section",
-                                    h3 { "Movement" }
-                                    div { class: "help-row", kbd { "↑↓" } span { "Navigate list" } }
-                                    div { class: "help-row", kbd { "j/k" } span { "Navigate (vim)" } }
-                                    div { class: "help-row", kbd { "←→" } span { "Sidebar / Main" } }
-                                    div { class: "help-row", kbd { "Enter" } span { "Select / Drill down" } }
-                                    div { class: "help-row", kbd { "Esc" } span { "Back / Close" } }
-                                }
-
-                                div { class: "help-section",
-                                    h3 { "General" }
-                                    div { class: "help-row", kbd { "/" } span { "Search" } }
-                                    div { class: "help-row", kbd { "n" } span { "Namespace selector" } }
-                                    div { class: "help-row", kbd { "^b" } span { "Toggle sidebar" } }
-                                    div { class: "help-row", kbd { "^k" } span { "Command palette" } }
-                                    div { class: "help-row", kbd { "?" } span { "This help" } }
+                                div { class: "help-footer",
+                                    "Press Esc or click outside to close"
                                 }
                             }
-
-                            div { class: "help-column",
-                                div { class: "help-section",
-                                    h3 { "Resources" }
-                                    div { class: "help-row", kbd { "y" } span { "View YAML" } }
-                                    div { class: "help-row", kbd { "c" } span { "Create resource" } }
-                                    div { class: "help-row", kbd { "^o" } span { "Apply manifest" } }
-                                    div { class: "help-row", kbd { "^d" } span { "Delete" } }
-                                    div { class: "help-row", kbd { "^k" } span { "Force delete" } }
-                                }
-
-                                div { class: "help-section",
-                                    h3 { "Pods" }
-                                    div { class: "help-row", kbd { "l" } span { "View logs" } }
-                                    div { class: "help-row", kbd { "s" } span { "Shell / Exec" } }
-                                    div { class: "help-row", kbd { "f" } span { "Port forward" } }
-                                    div { class: "help-row", kbd { "F" } span { "View port forwards" } }
-                                    div { class: "help-row", kbd { "w" } span { "Toggle line wrap" } }
-                                    div { class: "help-row", kbd { "r" } span { "Reveal secrets" } }
-                                }
-
-                                div { class: "help-section",
-                                    h3 { "Workloads" }
-                                    div { class: "help-row", kbd { "+/-" } span { "Scale replicas" } }
-                                    div { class: "help-row", kbd { "R" } span { "Restart rollout" } }
-                                    div { class: "help-row", kbd { "T" } span { "Trigger job" } }
-                                }
-                            }
-                        }
-
-                        div { class: "help-footer",
-                            "Press Esc or click outside to close"
                         }
                     }
+                }
+            }
+
+            // Keybindings settings modal
+            if keybindings_modal_open() {
+                KeybindingsModal {
+                    keybindings: plugin_config.read().keybindings.clone(),
+                    on_apply: move |new_kb: KeyBindings| {
+                        let mut config = plugin_config.read().clone();
+                        config.keybindings = new_kb;
+                        if let Err(e) = config.save() {
+                            tracing::error!("Failed to save keybindings: {}", e);
+                            plugin_error.set(Some(format!("Failed to save settings: {}", e)));
+                        }
+                        plugin_config.set(config);
+                        keybindings_modal_open.set(false);
+                        if let Some(app_ref) = app_container_ref.read().clone() {
+                            spawn(async move {
+                                let _ = app_ref.set_focus(true).await;
+                            });
+                        }
+                    },
+                    on_cancel: move |_| {
+                        keybindings_modal_open.set(false);
+                        if let Some(app_ref) = app_container_ref.read().clone() {
+                            spawn(async move {
+                                let _ = app_ref.set_focus(true).await;
+                            });
+                        }
+                    },
                 }
             }
         }

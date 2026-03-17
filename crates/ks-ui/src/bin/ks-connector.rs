@@ -272,6 +272,19 @@ async fn proxy_to_dioxus(path: &str, _params: &HashMap<String, String>) -> AppPa
 }
 
 /// Inject Phoenix Socket shim for Matrix WebSocket proxy
+/// Client-side Tab key interceptor.
+/// In liveview mode, `prevent_default()` runs server-side over WebSocket, so the
+/// browser has already executed the native Tab focus-cycle (highlighting the URL bar)
+/// before the round-trip completes. This small script runs on the client and prevents
+/// Tab's default behavior whenever the command mode bar is visible.
+const TAB_INTERCEPT_SCRIPT: &str = r#"<script>
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Tab' && document.querySelector('.command-mode-bar')) {
+    e.preventDefault();
+  }
+}, true);
+</script>"#;
+
 fn rewrite_dioxus_websocket_url(html: &str) -> String {
     let phoenix_shim = r#"<script>
 // Matrix Phoenix Socket Shim for Dioxus LiveView
@@ -499,7 +512,7 @@ fn rewrite_dioxus_websocket_url(html: &str) -> String {
         // Matrix Studio's TokenInjector handles injecting
         // window.__MATRIX_SESSION_TOKEN__ into the HTML before it reaches the
         // browser, so we only inject the Phoenix WebSocket shim here.
-        let injected = phoenix_shim.to_string();
+        let injected = format!("{}{}", phoenix_shim, TAB_INTERCEPT_SCRIPT);
 
         if let Some(head_end) = result.find("</head>") {
             result.insert_str(head_end, &injected);
@@ -532,7 +545,14 @@ async fn start_dioxus_server(ipc_addr: ks_ui::ipc::IpcAddr) {
                     Ok(kc) => auth::current_context(&kc),
                     Err(_) => None,
                 };
-                axum::Json(serde_json::to_value(app_manifest(cluster_name.as_deref())).unwrap())
+                let connector_name = std::env::var("CONNECTOR_NAME").ok();
+                axum::Json(
+                    serde_json::to_value(app_manifest(
+                        cluster_name.as_deref(),
+                        connector_name.as_deref(),
+                    ))
+                    .unwrap(),
+                )
             }),
         )
         .route(
@@ -1314,15 +1334,27 @@ fn tool_schemas() -> serde_json::Value {
 }
 
 /// Return the app manifest for this connector.
-/// When a cluster name is provided the sidebar shows KubeStudio > cluster.
-/// Without a cluster name it falls back to KubeStudio at the top level.
-fn app_manifest(cluster_name: Option<&str>) -> AppManifest {
-    match cluster_name {
-        Some(name) => AppManifest::new(name, "/")
+/// Sidebar label shows the cluster name, nested under the connector name when
+/// CONNECTOR_NAME is set, so users can distinguish multiple instances:
+///   - CONNECTOR_NAME + cluster → KubeStudio > ConnectorName > cluster
+///   - CONNECTOR_NAME only     → KubeStudio > ConnectorName
+///   - cluster only            → KubeStudio > cluster
+///   - neither                 → KubeStudio (top-level)
+fn app_manifest(cluster_name: Option<&str>, connector_name: Option<&str>) -> AppManifest {
+    match (connector_name, cluster_name) {
+        (Some(cn), Some(cl)) => AppManifest::new(cl, "/")
+            .description("Kubernetes cluster management dashboard")
+            .icon("hero-server-stack")
+            .navigation(NavigationConfig::nested(&["KubeStudio", cn])),
+        (Some(cn), None) => AppManifest::new(cn, "/")
             .description("Kubernetes cluster management dashboard")
             .icon("hero-server-stack")
             .navigation(NavigationConfig::nested(&["KubeStudio"])),
-        None => AppManifest::new("KubeStudio", "/")
+        (None, Some(cl)) => AppManifest::new(cl, "/")
+            .description("Kubernetes cluster management dashboard")
+            .icon("hero-server-stack")
+            .navigation(NavigationConfig::nested(&["KubeStudio"])),
+        (None, None) => AppManifest::new("KubeStudio", "/")
             .description("Kubernetes cluster management dashboard")
             .icon("hero-server-stack")
             .navigation(NavigationConfig::top_level()),
@@ -1334,8 +1366,9 @@ fn build_registration_message(
     config: &ConnectorConfig,
     jwt_token: Option<&str>,
     cluster_name: Option<&str>,
+    connector_name: Option<&str>,
 ) -> StreamMessage {
-    let manifest = app_manifest(cluster_name);
+    let manifest = app_manifest(cluster_name, connector_name);
 
     // Serialize manifest and inject api_access (field not yet in SDK 0.1.x).
     // Matrix reads api_access from the JSON manifest to decide on user consent.
@@ -1382,7 +1415,7 @@ fn build_registration_message(
         session_token: String::new(),
         scope: 0,
         instance_metadata: Some(InstanceMetadata {
-            display_name: "KubeStudio".to_string(),
+            display_name: connector_name.unwrap_or("KubeStudio").to_string(),
             tags: Vec::new(),
             metadata: std::collections::HashMap::new(),
         }),
@@ -1928,12 +1961,6 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|_| std::env::var("STRIKE48_HOST"))
         .unwrap_or_default();
     let mut config = ConnectorConfig::from_env();
-    // CONNECTOR_NAME overrides the gateway identity so each connector gets its
-    // own sidebar entry instead of round-robining under a shared gateway.
-    // Default: "app-kube-studio" (all instances share one gateway).
-    config.connector_type =
-        std::env::var("CONNECTOR_NAME").unwrap_or_else(|_| "app-kube-studio".to_string());
-
     if let Ok(instance_id) = std::env::var("INSTANCE_ID") {
         config.instance_id = instance_id;
     }
@@ -1955,9 +1982,18 @@ async fn main() -> anyhow::Result<()> {
         config.instance_id = format!("{}-{}", config.instance_id, cluster);
     }
 
-    // Store tenant_id in the global session so the ChatPanel (liveview)
-    // can read it when auto-creating the agent persona.
+    // CONNECTOR_NAME overrides the gateway identity so each connector gets
+    // its own sidebar entry and gateway. When not set, all instances share
+    // the default "app-kube-studio" gateway and round-robin (SDK default).
+    let explicit_connector_name: Option<String> = std::env::var("CONNECTOR_NAME").ok();
+    config.connector_type = explicit_connector_name
+        .clone()
+        .unwrap_or_else(|| "app-kube-studio".to_string());
+
+    // Store tenant_id and connector_type in the global session so the
+    // ChatPanel (liveview) can read them when auto-creating the agent persona.
     ks_ui::session::set_tenant_id(&config.tenant_id);
+    ks_ui::session::set_connector_type(&config.connector_type);
 
     let permission_mode = get_permission_mode();
     let mode_str = match permission_mode {
@@ -1970,6 +2006,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("  - Tenant: {}", config.tenant_id);
     tracing::info!("  - Gateway: {}", config.connector_type);
     tracing::info!("  - Instance: {}", config.instance_id);
+    if let Some(ref name) = explicit_connector_name {
+        tracing::info!("  - Connector Name: {}", name);
+    }
     if let Some(ref cluster) = default_cluster_name {
         tracing::info!("  - Cluster: {}", cluster);
     }
@@ -2076,6 +2115,7 @@ async fn main() -> anyhow::Result<()> {
             &config,
             jwt_token.as_deref(),
             default_cluster_name.as_deref(),
+            explicit_connector_name.as_deref(),
         );
 
         // Start bidirectional stream

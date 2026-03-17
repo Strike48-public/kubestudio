@@ -1,42 +1,42 @@
 use crate::components::{Command, Hotkey};
 use crate::hooks::ViewState;
-use ks_plugin::PluginConfig;
+use ks_plugin::{KeyBindings, PluginConfig};
 
 /// Get the command palette commands
-pub fn get_commands() -> Vec<Command> {
+pub fn get_commands(kb: &KeyBindings) -> Vec<Command> {
     vec![
         Command {
             id: "overview".to_string(),
             label: "Cluster Overview".to_string(),
-            shortcut: Some("o".to_string()),
+            shortcut: Some(kb.display("overview").to_string()),
         },
         Command {
             id: "pods".to_string(),
             label: "View Pods".to_string(),
-            shortcut: Some("1/p".to_string()),
+            shortcut: Some(kb.display("pods").to_string()),
         },
         Command {
             id: "deployments".to_string(),
             label: "View Deployments".to_string(),
-            shortcut: Some("2".to_string()),
+            shortcut: Some(kb.display("deployments").to_string()),
         },
         Command {
             id: "services".to_string(),
             label: "View Services".to_string(),
-            shortcut: Some("3".to_string()),
+            shortcut: Some(kb.display("services").to_string()),
         },
     ]
 }
 
 /// Get the command palette commands including external tools from plugin config
 pub fn get_commands_with_tools(config: &PluginConfig) -> Vec<Command> {
-    let mut commands = get_commands();
+    let mut commands = get_commands(&config.keybindings);
 
     // Add external tools from plugin config
     for tool in &config.tools {
         commands.push(Command {
             id: format!("tool:{}", tool.name),
-            label: format!("🔧 Launch {}", tool.name),
+            label: format!("Launch {}", tool.name),
             shortcut: None,
         });
     }
@@ -55,6 +55,7 @@ pub fn get_hotkeys(
     is_statefulsets_view: bool,
     is_daemonsets_view: bool,
     is_cronjobs_view: bool,
+    kb: &KeyBindings,
 ) -> Vec<Hotkey> {
     let is_resource_view = current_view != "overview";
 
@@ -69,7 +70,7 @@ pub fn get_hotkeys(
                 description: "Select".to_string(),
             },
             Hotkey {
-                key: "Ctrl+S".to_string(),
+                key: kb.display("apply_edit").to_string(),
                 description: "Apply".to_string(),
             },
             Hotkey {
@@ -79,7 +80,7 @@ pub fn get_hotkeys(
         ],
         ViewState::ApplyFile { .. } => vec![
             Hotkey {
-                key: "Ctrl+Enter".to_string(),
+                key: kb.display("apply_manifest_confirm").to_string(),
                 description: "Apply".to_string(),
             },
             Hotkey {
@@ -89,15 +90,15 @@ pub fn get_hotkeys(
         ],
         ViewState::YamlViewer { .. } => vec![
             Hotkey {
-                key: "c".to_string(),
+                key: kb.display("copy").to_string(),
                 description: "Copy".to_string(),
             },
             Hotkey {
-                key: "h".to_string(),
+                key: kb.display("toggle_view").to_string(),
                 description: "Toggle View".to_string(),
             },
             Hotkey {
-                key: "w".to_string(),
+                key: kb.display("toggle_wrap").to_string(),
                 description: "Toggle Wrap".to_string(),
             },
             Hotkey {
@@ -111,7 +112,7 @@ pub fn get_hotkeys(
         ],
         ViewState::LogViewer { .. } => vec![
             Hotkey {
-                key: "w".to_string(),
+                key: kb.display("toggle_wrap").to_string(),
                 description: "Toggle Wrap".to_string(),
             },
             Hotkey {
@@ -155,11 +156,11 @@ pub fn get_hotkeys(
                 description: "View Logs".to_string(),
             },
             Hotkey {
-                key: "l".to_string(),
+                key: kb.display("logs").to_string(),
                 description: "Logs".to_string(),
             },
             Hotkey {
-                key: "s".to_string(),
+                key: kb.display("shell").to_string(),
                 description: "Shell".to_string(),
             },
             Hotkey {
@@ -180,11 +181,11 @@ pub fn get_hotkeys(
                 description: "Containers".to_string(),
             },
             Hotkey {
-                key: "d".to_string(),
+                key: kb.display("describe").to_string(),
                 description: "Describe".to_string(),
             },
             Hotkey {
-                key: "l".to_string(),
+                key: kb.display("logs").to_string(),
                 description: "Logs".to_string(),
             },
             Hotkey {
@@ -202,7 +203,7 @@ pub fn get_hotkeys(
                 description: "View Pods".to_string(),
             },
             Hotkey {
-                key: "d".to_string(),
+                key: kb.display("describe").to_string(),
                 description: "Describe".to_string(),
             },
             Hotkey {
@@ -220,7 +221,7 @@ pub fn get_hotkeys(
                 description: "Details".to_string(),
             },
             Hotkey {
-                key: "d".to_string(),
+                key: kb.display("describe").to_string(),
                 description: "Describe".to_string(),
             },
             Hotkey {
@@ -238,7 +239,7 @@ pub fn get_hotkeys(
                 description: "Containers".to_string(),
             },
             Hotkey {
-                key: "d".to_string(),
+                key: kb.display("describe").to_string(),
                 description: "Describe".to_string(),
             },
             Hotkey {
@@ -250,63 +251,66 @@ pub fn get_hotkeys(
             if is_resource_view {
                 let mut keys = vec![
                     Hotkey {
-                        key: "d".to_string(),
+                        key: kb.display("describe").to_string(),
                         description: "Describe".to_string(),
                     },
                     Hotkey {
-                        key: "^d".to_string(),
+                        key: format!("^{}", kb.display("delete").trim_start_matches("Ctrl+")),
                         description: "Delete".to_string(),
                     },
                     Hotkey {
-                        key: "^k".to_string(),
+                        key: format!(
+                            "^{}",
+                            kb.display("force_delete").trim_start_matches("Ctrl+")
+                        ),
                         description: "Kill".to_string(),
                     },
                 ];
                 if is_pods_view {
                     keys.push(Hotkey {
-                        key: "l".to_string(),
+                        key: kb.display("logs").to_string(),
                         description: "Logs".to_string(),
                     });
                     keys.push(Hotkey {
-                        key: "s".to_string(),
+                        key: kb.display("shell").to_string(),
                         description: "Shell".to_string(),
                     });
                     keys.push(Hotkey {
-                        key: "f".to_string(),
+                        key: kb.display("port_forward").to_string(),
                         description: "Forward".to_string(),
                     });
                 } else if is_services_view {
                     keys.push(Hotkey {
-                        key: "f".to_string(),
+                        key: kb.display("port_forward").to_string(),
                         description: "Forward".to_string(),
                     });
                 } else if is_deployments_view {
                     keys.push(Hotkey {
-                        key: "+/-".to_string(),
+                        key: format!("{}/{}", kb.display("scale_up"), kb.display("scale_down")),
                         description: "Scale".to_string(),
                     });
                     keys.push(Hotkey {
-                        key: "R".to_string(),
+                        key: kb.display("restart").to_string(),
                         description: "Restart".to_string(),
                     });
                 } else if is_statefulsets_view || is_daemonsets_view {
                     keys.push(Hotkey {
-                        key: "R".to_string(),
+                        key: kb.display("restart").to_string(),
                         description: "Restart".to_string(),
                     });
                 } else if is_cronjobs_view {
                     keys.push(Hotkey {
-                        key: "T".to_string(),
+                        key: kb.display("trigger").to_string(),
                         description: "Trigger".to_string(),
                     });
                 }
                 keys.extend(vec![
                     Hotkey {
-                        key: "/".to_string(),
+                        key: kb.display("search").to_string(),
                         description: "Search".to_string(),
                     },
                     Hotkey {
-                        key: "n".to_string(),
+                        key: kb.display("namespace").to_string(),
                         description: "Namespace".to_string(),
                     },
                     Hotkey {
@@ -322,39 +326,39 @@ pub fn get_hotkeys(
             } else {
                 vec![
                     Hotkey {
-                        key: "o".to_string(),
+                        key: kb.display("overview").to_string(),
                         description: "Overview".to_string(),
                     },
                     Hotkey {
-                        key: "1/p".to_string(),
+                        key: kb.display("pods").to_string(),
                         description: "Pods".to_string(),
                     },
                     Hotkey {
-                        key: "2".to_string(),
+                        key: kb.display("deployments").to_string(),
                         description: "Deployments".to_string(),
                     },
                     Hotkey {
-                        key: "3".to_string(),
+                        key: kb.display("services").to_string(),
                         description: "Services".to_string(),
                     },
                     Hotkey {
-                        key: "v".to_string(),
+                        key: kb.display("events").to_string(),
                         description: "Events".to_string(),
                     },
                     Hotkey {
-                        key: "/".to_string(),
+                        key: kb.display("search").to_string(),
                         description: "Search".to_string(),
                     },
                     Hotkey {
-                        key: ":".to_string(),
+                        key: kb.display("command_mode").to_string(),
                         description: "Command".to_string(),
                     },
                     Hotkey {
-                        key: "n".to_string(),
+                        key: kb.display("namespace").to_string(),
                         description: "Namespace".to_string(),
                     },
                     Hotkey {
-                        key: "?".to_string(),
+                        key: kb.display("help").to_string(),
                         description: "Help".to_string(),
                     },
                 ]

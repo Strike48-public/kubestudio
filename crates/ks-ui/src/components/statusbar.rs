@@ -16,6 +16,9 @@ pub struct StatusBarProps {
     /// Read-only mode indicator
     #[props(default = false)]
     pub read_only: bool,
+    /// Remappable keybindings
+    #[props(default)]
+    pub keybindings: ks_plugin::KeyBindings,
 }
 
 #[component]
@@ -70,19 +73,19 @@ pub fn StatusBar(props: StatusBarProps) -> Element {
                             handler.call(());
                         }
                     },
-                    title: "Click or press Shift+F to view port-forwards",
+                    title: format!("Click or press {} to view port-forwards", props.keybindings.display("port_forwards")),
                     span { class: "status-indicator pf-active" }
                     span { class: "status-label", "Forwards: " }
                     span { class: "status-value", "{props.port_forward_count}" }
                 }
             }
             div { class: "status-item status-help",
-                kbd { "o" } span { " overview  " }
-                kbd { "p" } span { " pods  " }
-                kbd { "d" } span { " deploy  " }
-                kbd { "s" } span { " svc  " }
-                kbd { "F" } span { " fwd  " }
-                kbd { "?" } span { " help" }
+                kbd { {props.keybindings.display("overview").to_string()} } span { " overview  " }
+                kbd { {props.keybindings.display("pods").to_string()} } span { " pods  " }
+                kbd { {props.keybindings.display("deployments").to_string()} } span { " deploy  " }
+                kbd { {props.keybindings.display("services").to_string()} } span { " svc  " }
+                kbd { {props.keybindings.display("port_forwards").to_string()} } span { " fwd  " }
+                kbd { {props.keybindings.display("help").to_string()} } span { " help" }
             }
         }
     }

@@ -1,11 +1,202 @@
 // Node list component for displaying cluster nodes
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use k8s_openapi::api::core::v1::Node;
 use ks_kube::NodeMetrics;
-use lucide_dioxus::Server;
+use lucide_dioxus::{ChevronDown, ChevronUp, Server};
+
+use super::resource_list::SortDirection;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum NodeSortColumn {
+    Name,
+    Roles,
+    Cpu,
+    Memory,
+    Version,
+    Status,
+    Age,
+}
+
+#[derive(Clone, Copy, PartialEq, Default, Debug)]
+pub struct NodeSortState {
+    pub column: Option<NodeSortColumn>,
+    pub direction: Option<SortDirection>,
+}
+
+impl NodeSortState {
+    fn cycle(self, column: NodeSortColumn) -> Self {
+        if self.column == Some(column) {
+            match self.direction {
+                Some(SortDirection::Ascending) => NodeSortState {
+                    column: Some(column),
+                    direction: Some(SortDirection::Descending),
+                },
+                Some(SortDirection::Descending) => NodeSortState::default(),
+                _ => NodeSortState {
+                    column: Some(column),
+                    direction: Some(SortDirection::Ascending),
+                },
+            }
+        } else {
+            NodeSortState {
+                column: Some(column),
+                direction: Some(SortDirection::Ascending),
+            }
+        }
+    }
+
+    fn is_asc(&self, column: NodeSortColumn) -> bool {
+        self.column == Some(column) && self.direction == Some(SortDirection::Ascending)
+    }
+
+    fn is_desc(&self, column: NodeSortColumn) -> bool {
+        self.column == Some(column) && self.direction == Some(SortDirection::Descending)
+    }
+}
+
+fn parse_cpu_to_millicores(cpu: &str) -> Option<i64> {
+    let cpu = cpu.trim();
+    if cpu == "-" || cpu.is_empty() {
+        return None;
+    }
+    if cpu.ends_with('m') {
+        cpu.trim_end_matches('m').parse::<i64>().ok()
+    } else if cpu.ends_with('n') {
+        cpu.trim_end_matches('n')
+            .parse::<i64>()
+            .ok()
+            .map(|n| n / 1_000_000)
+    } else {
+        cpu.parse::<f64>().ok().map(|v| (v * 1000.0) as i64)
+    }
+}
+
+fn parse_memory_to_ki(mem: &str) -> Option<i64> {
+    let mem = mem.trim();
+    if mem == "-" || mem.is_empty() {
+        return None;
+    }
+    if mem.ends_with("Ti") {
+        mem.trim_end_matches("Ti")
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v * 1024.0 * 1024.0 * 1024.0) as i64)
+    } else if mem.ends_with("Gi") {
+        mem.trim_end_matches("Gi")
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v * 1024.0 * 1024.0) as i64)
+    } else if mem.ends_with("Mi") {
+        mem.trim_end_matches("Mi")
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v * 1024.0) as i64)
+    } else if mem.ends_with("Ki") {
+        mem.trim_end_matches("Ki").parse::<i64>().ok()
+    } else {
+        mem.parse::<f64>().ok().map(|v| (v / 1024.0) as i64)
+    }
+}
+
+fn parse_age_to_seconds(age: &str) -> Option<i64> {
+    let age = age.trim();
+    if age.is_empty() || age == "-" {
+        return None;
+    }
+    let mut total: i64 = 0;
+    let mut num_buf = String::new();
+    for ch in age.chars() {
+        if ch.is_ascii_digit() {
+            num_buf.push(ch);
+        } else {
+            let n: i64 = num_buf.parse().ok()?;
+            num_buf.clear();
+            match ch {
+                'd' => total += n * 86400,
+                'h' => total += n * 3600,
+                'm' => total += n * 60,
+                's' => total += n,
+                _ => return None,
+            }
+        }
+    }
+    if total > 0 { Some(total) } else { None }
+}
+
+fn node_status_severity(status: &str) -> u8 {
+    match status {
+        "Ready" => 0,
+        "NotReady" => 1,
+        _ => 2,
+    }
+}
+
+/// Pre-computed sort keys for a node row
+struct NodeSortKeys {
+    name: String,
+    roles: String,
+    cpu: String,
+    memory: String,
+    version: String,
+    status: String,
+    age: String,
+}
+
+fn sort_nodes(nodes: &mut [(Node, NodeSortKeys)], state: &NodeSortState) {
+    let (Some(column), Some(direction)) = (state.column, state.direction) else {
+        return;
+    };
+    nodes.sort_by(|a, b| {
+        let (_, ka) = a;
+        let (_, kb) = b;
+        let ord = match column {
+            NodeSortColumn::Name => ka.name.to_lowercase().cmp(&kb.name.to_lowercase()),
+            NodeSortColumn::Roles => ka.roles.to_lowercase().cmp(&kb.roles.to_lowercase()),
+            NodeSortColumn::Cpu => {
+                match (
+                    parse_cpu_to_millicores(&ka.cpu),
+                    parse_cpu_to_millicores(&kb.cpu),
+                ) {
+                    (Some(av), Some(bv)) => av.cmp(&bv),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            }
+            NodeSortColumn::Memory => {
+                match (
+                    parse_memory_to_ki(&ka.memory),
+                    parse_memory_to_ki(&kb.memory),
+                ) {
+                    (Some(av), Some(bv)) => av.cmp(&bv),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            }
+            NodeSortColumn::Version => ka.version.cmp(&kb.version),
+            NodeSortColumn::Status => {
+                node_status_severity(&ka.status).cmp(&node_status_severity(&kb.status))
+            }
+            NodeSortColumn::Age => {
+                match (parse_age_to_seconds(&ka.age), parse_age_to_seconds(&kb.age)) {
+                    (Some(a_s), Some(b_s)) => a_s.cmp(&b_s),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            }
+        };
+        match direction {
+            SortDirection::Ascending => ord,
+            SortDirection::Descending => ord.reverse(),
+        }
+    });
+}
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NodeListProps {
@@ -23,19 +214,71 @@ pub struct NodeListProps {
     /// Whether metrics are available
     #[props(default = false)]
     pub metrics_available: bool,
+    /// Sort state (managed by parent for persistence across data refreshes)
+    #[props(default = None)]
+    pub sort_state: Option<Signal<NodeSortState>>,
 }
 
 #[component]
 pub fn NodeList(props: NodeListProps) -> Element {
-    let nodes = &props.nodes;
-    let is_empty = nodes.is_empty();
+    let local_sort = use_signal(NodeSortState::default);
+    let mut sort = props.sort_state.unwrap_or(local_sort);
+    let current_sort = *sort.read();
+
+    let node_count = props.nodes.len();
+    let is_empty = node_count == 0;
+
+    // Pre-compute sort keys and sort
+    let mut keyed_nodes: Vec<(Node, NodeSortKeys)> = props
+        .nodes
+        .iter()
+        .map(|node| {
+            let name = node.metadata.name.clone().unwrap_or_default();
+            let (status, _) = get_node_status(node);
+            let roles = get_node_roles(node);
+            let (cpu, memory) = if let Some(ref metrics_map) = props.metrics
+                && let Some(node_metrics) = metrics_map.get(&name)
+            {
+                (
+                    node_metrics.cpu_usage.clone(),
+                    node_metrics.memory_usage.clone(),
+                )
+            } else {
+                (get_node_cpu(node), get_node_memory(node))
+            };
+            let version = get_node_version(node);
+            let age = get_node_age(node);
+            let keys = NodeSortKeys {
+                name,
+                roles,
+                cpu,
+                memory,
+                version,
+                status,
+                age,
+            };
+            (node.clone(), keys)
+        })
+        .collect();
+    sort_nodes(&mut keyed_nodes, &current_sort);
+
+    let cpu_label = if props.metrics_available {
+        "CPU Usage"
+    } else {
+        "CPU"
+    };
+    let mem_label = if props.metrics_available {
+        "Mem Usage"
+    } else {
+        "Memory"
+    };
 
     rsx! {
         div { class: "container-drilldown",
             // Header - matches drilldown style
             div { class: "drilldown-header",
                 h3 { "Nodes" }
-                span { class: "drilldown-count", "{nodes.len()}" }
+                span { class: "drilldown-count", "{node_count}" }
             }
 
             // Hint text
@@ -55,41 +298,78 @@ pub fn NodeList(props: NodeListProps) -> Element {
                         thead {
                             tr {
                                 th { class: "col-status", "" }
-                                th { class: "col-name", "Name" }
-                                th { class: "col-roles", "Roles" }
-                                th { class: "col-cpu",
-                                    if props.metrics_available { "CPU Usage" } else { "CPU" }
+                                th {
+                                    class: "col-name sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Name)); },
+                                    span { class: "sortable-header-content",
+                                        "Name"
+                                        if current_sort.is_asc(NodeSortColumn::Name) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Name) { ChevronDown { size: 14 } }
+                                    }
                                 }
-                                th { class: "col-memory",
-                                    if props.metrics_available { "Mem Usage" } else { "Memory" }
+                                th {
+                                    class: "col-roles sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Roles)); },
+                                    span { class: "sortable-header-content",
+                                        "Roles"
+                                        if current_sort.is_asc(NodeSortColumn::Roles) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Roles) { ChevronDown { size: 14 } }
+                                    }
                                 }
-                                th { class: "col-version", "Version" }
-                                th { class: "col-status-text", "Status" }
-                                th { class: "col-age", "Age" }
+                                th {
+                                    class: "col-cpu sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Cpu)); },
+                                    span { class: "sortable-header-content",
+                                        "{cpu_label}"
+                                        if current_sort.is_asc(NodeSortColumn::Cpu) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Cpu) { ChevronDown { size: 14 } }
+                                    }
+                                }
+                                th {
+                                    class: "col-memory sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Memory)); },
+                                    span { class: "sortable-header-content",
+                                        "{mem_label}"
+                                        if current_sort.is_asc(NodeSortColumn::Memory) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Memory) { ChevronDown { size: 14 } }
+                                    }
+                                }
+                                th {
+                                    class: "col-version sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Version)); },
+                                    span { class: "sortable-header-content",
+                                        "Version"
+                                        if current_sort.is_asc(NodeSortColumn::Version) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Version) { ChevronDown { size: 14 } }
+                                    }
+                                }
+                                th {
+                                    class: "col-status-text sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Status)); },
+                                    span { class: "sortable-header-content",
+                                        "Status"
+                                        if current_sort.is_asc(NodeSortColumn::Status) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Status) { ChevronDown { size: 14 } }
+                                    }
+                                }
+                                th {
+                                    class: "col-age sortable-header",
+                                    onclick: move |_| { sort.set(current_sort.cycle(NodeSortColumn::Age)); },
+                                    span { class: "sortable-header-content",
+                                        "Age"
+                                        if current_sort.is_asc(NodeSortColumn::Age) { ChevronUp { size: 14 } }
+                                        if current_sort.is_desc(NodeSortColumn::Age) { ChevronDown { size: 14 } }
+                                    }
+                                }
                             }
                         }
                         tbody {
-                            for (idx, node) in nodes.iter().enumerate() {
+                            for (idx, (node, keys)) in keyed_nodes.iter().enumerate() {
                                 {
                                     let is_selected = props.selected_index == Some(idx) && props.is_focused;
                                     let node_clone = node.clone();
                                     let on_select = props.on_select;
-
-                                    let name = node.metadata.name.clone().unwrap_or_default();
-                                    let (status, status_class) = get_node_status(node);
-                                    let roles = get_node_roles(node);
-
-                                    // If metrics available, show usage; otherwise show allocatable capacity
-                                    let (cpu, memory) = if let Some(ref metrics_map) = props.metrics
-                                        && let Some(node_metrics) = metrics_map.get(&name)
-                                    {
-                                        (node_metrics.cpu_usage.clone(), node_metrics.memory_usage.clone())
-                                    } else {
-                                        (get_node_cpu(node), get_node_memory(node))
-                                    };
-
-                                    let version = get_node_version(node);
-                                    let age = get_node_age(node);
+                                    let (_, status_class) = get_node_status(node);
 
                                     let row_class = if is_selected {
                                         "container-row selected"
@@ -99,21 +379,21 @@ pub fn NodeList(props: NodeListProps) -> Element {
 
                                     rsx! {
                                         tr {
-                                            key: "{name}",
+                                            key: "{keys.name}",
                                             class: "{row_class}",
                                             onclick: move |_| on_select.call(node_clone.clone()),
                                             td { class: "col-status",
                                                 span { class: "status-dot {status_class}" }
                                             }
-                                            td { class: "col-name", "{name}" }
-                                            td { class: "col-roles", "{roles}" }
-                                            td { class: "col-cpu", "{cpu}" }
-                                            td { class: "col-memory", "{memory}" }
-                                            td { class: "col-version", "{version}" }
+                                            td { class: "col-name", "{keys.name}" }
+                                            td { class: "col-roles", "{keys.roles}" }
+                                            td { class: "col-cpu", "{keys.cpu}" }
+                                            td { class: "col-memory", "{keys.memory}" }
+                                            td { class: "col-version", "{keys.version}" }
                                             td { class: "col-status-text",
-                                                span { class: "status-badge {status_class}", "{status}" }
+                                                span { class: "status-badge {status_class}", "{keys.status}" }
                                             }
-                                            td { class: "col-age", "{age}" }
+                                            td { class: "col-age", "{keys.age}" }
                                         }
                                     }
                                 }

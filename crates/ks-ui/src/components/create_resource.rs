@@ -20,6 +20,9 @@ pub struct CreateResourceProps {
     pub namespace: Option<String>,
     /// Called when user cancels or finishes
     pub on_close: EventHandler<()>,
+    /// Remappable keybindings
+    #[props(default)]
+    pub keybindings: ks_plugin::KeyBindings,
 }
 
 #[component]
@@ -153,8 +156,11 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                         }
                     }
                     CreateState::EditYaml(_) => {
-                        // Handle Ctrl+S for apply
-                        if (e.modifiers().ctrl() || e.modifiers().meta()) && e.key() == Key::Character("s".to_string()) {
+                        // Handle apply_edit keybinding (default Ctrl+S)
+                        let apply_match = if let Key::Character(ref c) = e.key() {
+                            props.keybindings.matches("apply_edit", c, e.modifiers().ctrl(), e.modifiers().shift(), e.modifiers().alt(), e.modifiers().meta())
+                        } else { false };
+                        if apply_match {
                             let yaml_to_apply = edited_yaml.read().clone();
                             state.set(CreateState::Applying);
 
@@ -252,7 +258,7 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                     CreateState::EditYaml(_) => rsx! {
                         div { class: "create-header",
                             h3 { "Edit YAML" }
-                            span { class: "create-hint", "Ctrl+S to apply • Esc to go back" }
+                            span { class: "create-hint", {format!("{} to apply • Esc to go back", props.keybindings.display("apply_edit"))} }
                         }
                         textarea {
                             class: "yaml-editor create-editor",

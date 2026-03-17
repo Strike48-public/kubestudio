@@ -18,6 +18,9 @@ pub struct LogViewerProps {
     pub cluster: Signal<Option<ClusterContext>>,
     /// Called when user presses Escape or Back button
     pub on_back: EventHandler<()>,
+    /// Remappable keybindings
+    #[props(default)]
+    pub keybindings: ks_plugin::KeyBindings,
 }
 
 #[component]
@@ -213,7 +216,10 @@ pub fn LogViewer(props: LogViewerProps) -> Element {
 
             // Hint bar
             div { class: "log-hints",
-                "f: Toggle follow • t: Timestamps • w: Wrap • ↑↓: Scroll • Esc: Back"
+                {format!("{}: Toggle follow • {}: Timestamps • {}: Wrap • ↑↓: Scroll • Esc: Back",
+                    props.keybindings.display("toggle_follow"),
+                    props.keybindings.display("toggle_timestamps"),
+                    props.keybindings.display("toggle_wrap"))}
             }
 
             div { class: "log-viewer",
@@ -249,34 +255,31 @@ pub fn LogViewer(props: LogViewerProps) -> Element {
                                 on_back_key.call(());
                                 e.stop_propagation();
                             } else {
+                                let kb = &props.keybindings;
+                                let (ctrl, shift, alt, meta) = (e.modifiers().ctrl(), e.modifiers().shift(), e.modifiers().alt(), e.modifiers().meta());
                                 match e.key() {
-                                    Key::Character(ref c) if !e.modifiers().ctrl() && !e.modifiers().meta() => {
-                                        match c.as_str() {
-                                            "w" => {
-                                                let new_wrap = !*text_wrap.read();
-                                                text_wrap.set(new_wrap);
-                                                e.stop_propagation();
-                                                e.prevent_default();
+                                    Key::Character(ref c) if !ctrl && !meta => {
+                                        let key = c.as_str();
+                                        if kb.matches("toggle_wrap", key, ctrl, shift, alt, meta) {
+                                            let new_wrap = !*text_wrap.read();
+                                            text_wrap.set(new_wrap);
+                                            e.stop_propagation();
+                                            e.prevent_default();
+                                        } else if kb.matches("toggle_follow", key, ctrl, shift, alt, meta) {
+                                            let new_following = !*following.read();
+                                            following.set(new_following);
+                                            if new_following {
+                                                should_scroll.set(true);
                                             }
-                                            "f" => {
-                                                // Toggle follow mode
-                                                let new_following = !*following.read();
-                                                following.set(new_following);
-                                                if new_following {
-                                                    should_scroll.set(true);
-                                                }
-                                                e.stop_propagation();
-                                                e.prevent_default();
-                                            }
-                                            "t" => {
-                                                let new_timestamps = !*show_timestamps.read();
-                                                show_timestamps.set(new_timestamps);
-                                                e.stop_propagation();
-                                                e.prevent_default();
-                                            }
-                                            _ => {
-                                                e.stop_propagation();
-                                            }
+                                            e.stop_propagation();
+                                            e.prevent_default();
+                                        } else if kb.matches("toggle_timestamps", key, ctrl, shift, alt, meta) {
+                                            let new_timestamps = !*show_timestamps.read();
+                                            show_timestamps.set(new_timestamps);
+                                            e.stop_propagation();
+                                            e.prevent_default();
+                                        } else {
+                                            e.stop_propagation();
                                         }
                                     }
                                     Key::ArrowUp | Key::PageUp => {

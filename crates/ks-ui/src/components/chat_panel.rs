@@ -27,12 +27,11 @@ const CHAT_DEFAULT_WIDTH: i32 = 380;
 /// Build the default CreateAgentInput for auto-creating a kubestudio persona.
 ///
 /// `tenant_id` is the tenant/realm name (e.g. "non-prod") used to build the
-/// connector address pattern `{tenant}.app-kube-studio.*` so the Matrix
+/// connector address pattern `{tenant}.{connector_type}.*` so the Matrix
 /// backend can match registered connector tools to this agent.
 fn default_kubestudio_agent_input(tenant_id: &str) -> CreateAgentInput {
-    let connector_name =
-        std::env::var("CONNECTOR_NAME").unwrap_or_else(|_| "app-kube-studio".to_string());
-    let connector_key = format!("{}.{}.*", tenant_id, connector_name);
+    let connector_type = crate::session::get_connector_type();
+    let connector_key = format!("{}.{}.*", tenant_id, connector_type);
 
     let mut connectors = serde_json::Map::new();
     connectors.insert(

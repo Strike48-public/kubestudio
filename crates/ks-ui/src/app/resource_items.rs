@@ -1,4 +1,4 @@
-use super::helpers::format_age;
+use super::helpers::{age_seconds, format_age};
 use crate::components::ResourceItem;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -61,6 +61,7 @@ pub fn pods_to_items(pods: &[Pod]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: pod_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts,
             }
@@ -119,6 +120,7 @@ pub fn deployments_to_items(deployments: &[Deployment]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: deployment_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
@@ -156,6 +158,7 @@ pub fn statefulsets_to_items(statefulsets: &[StatefulSet]) -> Vec<ResourceItem> 
                 namespace: metadata.namespace.clone(),
                 status: sts_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
@@ -193,6 +196,7 @@ pub fn daemonsets_to_items(daemonsets: &[DaemonSet]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: ds_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
@@ -233,6 +237,7 @@ pub fn jobs_to_items(jobs: &[Job]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: job_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
@@ -273,6 +278,7 @@ pub fn cronjobs_to_items(cronjobs: &[CronJob]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: cj_status,
                 age: schedule,
+                age_seconds: None,
                 ready,
                 restarts: None,
             }
@@ -295,6 +301,7 @@ pub fn configmaps_to_items(configmaps: &[ConfigMap]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: "Active".to_string(),
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!("{} keys", total_keys)),
                 restarts: None,
             }
@@ -403,6 +410,7 @@ pub fn secrets_to_items(secrets: &[Secret], pods: &[Pod]) -> Vec<ResourceItem> {
                 namespace: secret_namespace,
                 status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready,
                 restarts: None,
             }
@@ -472,6 +480,7 @@ pub fn services_to_items(services: &[Service], endpoints: &[Endpoints]) -> Vec<R
                 namespace: metadata.namespace.clone(),
                 status: svc_status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!(
                     "{} ({} port{})",
                     service_type,
@@ -510,6 +519,7 @@ pub fn endpoints_to_items(endpoints: &[Endpoints]) -> Vec<ResourceItem> {
                     "NotReady".to_string()
                 },
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!(
                     "{} address{}",
                     address_count,
@@ -547,6 +557,7 @@ pub fn persistentvolumes_to_items(pvs: &[PersistentVolume]) -> Vec<ResourceItem>
                 namespace: None,
                 status: phase,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!("{} ({})", capacity, storage_class)),
                 restarts: None,
             }
@@ -580,6 +591,7 @@ pub fn persistentvolumeclaims_to_items(pvcs: &[PersistentVolumeClaim]) -> Vec<Re
                 namespace: metadata.namespace.clone(),
                 status: phase,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!("{} ({})", capacity, storage_class)),
                 restarts: None,
             }
@@ -623,6 +635,7 @@ pub fn ingresses_to_items(ingresses: &[Ingress]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: ingress_class,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: lb_info.or(Some(format!(
                     "{} rule{}",
                     rule_count,
@@ -676,6 +689,7 @@ pub fn storageclasses_to_items(storageclasses: &[StorageClass]) -> Vec<ResourceI
                 namespace: None,
                 status,
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: Some(format!("{} / {}", reclaim_policy, binding_mode)),
                 restarts: None,
             }
@@ -708,6 +722,7 @@ pub fn events_to_items(events: &[Event]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: event_type,
                 age: reason,
+                age_seconds: None,
                 ready: Some(message),
                 restarts: event.count.map(|c| c as u32),
             }
@@ -739,6 +754,7 @@ pub fn nodes_to_items(nodes: &[Node]) -> Vec<ResourceItem> {
                     "NotReady".to_string()
                 },
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: None,
                 restarts: None,
             }
@@ -757,6 +773,7 @@ pub fn roles_to_items(roles: &[Role]) -> Vec<ResourceItem> {
                 namespace: metadata.namespace.clone(),
                 status: format!("{} rules", rule_count),
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: None,
                 restarts: None,
             }
@@ -775,6 +792,7 @@ pub fn clusterroles_to_items(clusterroles: &[ClusterRole]) -> Vec<ResourceItem> 
                 namespace: None,
                 status: format!("{} rules", rule_count),
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: None,
                 restarts: None,
             }
@@ -793,6 +811,7 @@ pub fn rolebindings_to_items(rolebindings: &[RoleBinding]) -> Vec<ResourceItem> 
                 namespace: metadata.namespace.clone(),
                 status: format!("{}/{}", role_ref.kind, role_ref.name),
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: None,
                 restarts: None,
             }
@@ -810,6 +829,7 @@ pub fn clusterrolebindings_to_items(crbs: &[ClusterRoleBinding]) -> Vec<Resource
                 namespace: None,
                 status: format!("{}/{}", role_ref.kind, role_ref.name),
                 age: format_age(metadata.creation_timestamp.as_ref()),
+                age_seconds: age_seconds(metadata.creation_timestamp.as_ref()),
                 ready: None,
                 restarts: None,
             }
