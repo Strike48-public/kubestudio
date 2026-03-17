@@ -8,6 +8,8 @@ use std::sync::{LazyLock, RwLock};
 static USER_AUTH_TOKEN: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
 static USER_DISPLAY_NAME: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
 static TENANT_ID: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
+static CONNECTOR_TYPE: LazyLock<RwLock<String>> =
+    LazyLock::new(|| RwLock::new("app-kube-studio".to_string()));
 
 pub fn get_auth_token() -> String {
     USER_AUTH_TOKEN
@@ -44,5 +46,20 @@ pub fn get_tenant_id() -> String {
 pub fn set_tenant_id(tenant: &str) {
     if let Ok(mut t) = TENANT_ID.write() {
         *t = tenant.to_string();
+    }
+}
+
+/// Read the connector type / gateway identity (e.g. "app-kube-studio" or custom CONNECTOR_NAME).
+pub fn get_connector_type() -> String {
+    CONNECTOR_TYPE
+        .read()
+        .map(|t| t.clone())
+        .unwrap_or_else(|_| "app-kube-studio".to_string())
+}
+
+/// Store the connector type / gateway identity.
+pub fn set_connector_type(ct: &str) {
+    if let Ok(mut t) = CONNECTOR_TYPE.write() {
+        *t = ct.to_string();
     }
 }
