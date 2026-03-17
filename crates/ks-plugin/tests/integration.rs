@@ -1,4 +1,6 @@
-use ks_plugin::{CustomHotkey, ExternalTool, ParsedHotkey, PluginConfig, TemplateContext};
+use ks_plugin::{
+    CustomHotkey, ExternalTool, KeyBindings, ParsedHotkey, PluginConfig, TemplateContext,
+};
 use std::io::Write;
 
 // --- Config loading from file ---
@@ -488,4 +490,103 @@ fn test_save_and_reload() {
     assert_eq!(loaded.resolve_alias("custom"), Some(&"pods".to_string()));
     assert_eq!(loaded.hotkeys.len(), 1);
     assert_eq!(loaded.hotkeys[0].key, "Alt+T");
+}
+
+// --- Keybinding loading ---
+
+#[test]
+fn test_load_config_with_keybindings_section() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        tmp,
+        r#"keybindings:
+  pods: "x"
+  describe: "y"
+"#
+    )
+    .unwrap();
+
+    let config = PluginConfig::load_from_path(tmp.path()).unwrap();
+    // Overridden values
+    assert_eq!(config.keybindings.pods, "x");
+    assert_eq!(config.keybindings.describe, "y");
+    // Defaults preserved for non-overridden fields
+    assert_eq!(config.keybindings.overview, "o");
+    assert_eq!(config.keybindings.deployments, "2");
+    assert_eq!(config.keybindings.services, "3");
+    assert_eq!(config.keybindings.delete, "Ctrl+d");
+    assert_eq!(config.keybindings.logs, "l");
+}
+
+#[test]
+fn test_load_config_without_keybindings_has_defaults() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "aliases:\n  dp: deployments").unwrap();
+
+    let config = PluginConfig::load_from_path(tmp.path()).unwrap();
+    assert_eq!(config.keybindings, KeyBindings::default());
+}
+
+#[test]
+fn test_keybindings_matches_after_override() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        tmp,
+        r#"keybindings:
+  pods: "x"
+"#
+    )
+    .unwrap();
+
+    let config = PluginConfig::load_from_path(tmp.path()).unwrap();
+    // "x" should now match pods
+    assert!(
+        config
+            .keybindings
+            .matches("pods", "x", false, false, false, false)
+    );
+    // "p" should no longer match pods
+    assert!(
+        !config
+            .keybindings
+            .matches("pods", "p", false, false, false, false)
+    );
+    // Other defaults still work
+    assert!(
+        config
+            .keybindings
+            .matches("overview", "o", false, false, false, false)
+    );
+    assert!(
+        config
+            .keybindings
+            .matches("delete", "d", true, false, false, false)
+    );
+}
+
+#[test]
+fn test_keybindings_display_after_override() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(
+        tmp,
+        r#"keybindings:
+  pods: "x"
+  delete: "Ctrl+x"
+"#
+    )
+    .unwrap();
+
+    let config = PluginConfig::load_from_path(tmp.path()).unwrap();
+    assert_eq!(config.keybindings.display("pods"), "x");
+    assert_eq!(config.keybindings.display("delete"), "Ctrl+x");
+    // Defaults preserved
+    assert_eq!(config.keybindings.display("overview"), "o");
+}
+
+#[test]
+fn test_keybindings_yaml_roundtrip() {
+    let config = PluginConfig::with_defaults();
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let parsed: PluginConfig = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(parsed.keybindings, config.keybindings);
 }

@@ -36,6 +36,9 @@ pub struct ApplyManifestProps {
     pub source: ApplySource,
     /// Called when user closes the view
     pub on_close: EventHandler<()>,
+    /// Remappable keybindings
+    #[props(default)]
+    pub keybindings: ks_plugin::KeyBindings,
 }
 
 #[component]
@@ -103,8 +106,14 @@ pub fn ApplyManifest(props: ApplyManifestProps) -> Element {
                 let current_state = state.read().clone();
                 match current_state {
                     ApplyManifestState::Preview { .. } => {
-                        // Handle Ctrl+Enter for apply
-                        if (e.modifiers().ctrl() || e.modifiers().meta()) && e.key() == Key::Enter {
+                        // Handle apply_manifest_confirm keybinding (default Ctrl+Enter)
+                        let confirm_match = if let Key::Character(ref c) = e.key() {
+                            props.keybindings.matches("apply_manifest_confirm", c, e.modifiers().ctrl(), e.modifiers().shift(), e.modifiers().alt(), e.modifiers().meta())
+                        } else if e.key() == Key::Enter {
+                            // Also check if Enter with modifiers matches (for Ctrl+Enter default)
+                            props.keybindings.matches("apply_manifest_confirm", "Enter", e.modifiers().ctrl(), e.modifiers().shift(), e.modifiers().alt(), e.modifiers().meta())
+                        } else { false };
+                        if confirm_match {
                             let yaml_to_apply = edited_yaml.read().clone();
                             state.set(ApplyManifestState::Applying);
 
@@ -176,7 +185,7 @@ pub fn ApplyManifest(props: ApplyManifestProps) -> Element {
                         div { class: "apply-header",
                             h3 { "Apply Manifest" }
                             span { class: "apply-hint",
-                                "Source: {source} • {doc_count} document(s) • Ctrl+Enter to apply • Esc to cancel"
+                                {format!("Source: {} • {} document(s) • {} to apply • Esc to cancel", source, doc_count, props.keybindings.display("apply_manifest_confirm"))}
                             }
                         }
                         textarea {

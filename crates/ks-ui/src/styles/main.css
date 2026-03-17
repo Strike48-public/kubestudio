@@ -3091,6 +3091,194 @@ code {
     border-top: 1px solid var(--border);
 }
 
+/* ============================================
+   KEYBINDINGS MODAL
+   ============================================ */
+.keybindings-modal {
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 600px;
+    width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.keybindings-modal h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin: 0 0 1rem 0;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.keybindings-body {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+    min-height: 0;
+}
+
+.keybindings-body::-webkit-scrollbar {
+    display: none;
+}
+
+.keybindings-category h3 {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--info);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 1rem 0 0.4rem 0;
+}
+
+.keybindings-category:first-child h3 {
+    margin-top: 0;
+}
+
+.keybindings-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.keybindings-row:hover {
+    background: var(--background);
+}
+
+.keybindings-row.recording {
+    background: color-mix(in srgb, var(--info) 10%, transparent);
+    outline: 1px solid var(--info);
+}
+
+.kb-label {
+    flex: 1;
+    color: var(--muted-foreground);
+    font-size: 0.8rem;
+}
+
+.kb-value {
+    background: var(--background);
+    color: var(--info);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+    min-width: 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.kb-value:hover {
+    border-color: var(--info);
+}
+
+.kb-recording {
+    font-style: italic;
+    color: var(--info);
+    font-size: 0.8rem;
+    animation: kb-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes kb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.kb-edit-input {
+    background: var(--background);
+    color: var(--foreground);
+    border: 1px solid var(--info);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.7rem;
+    width: 8rem;
+    outline: none;
+}
+
+.kb-reset-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0.15rem 0.3rem;
+    border-radius: 3px;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.keybindings-row:hover .kb-reset-btn {
+    opacity: 1;
+}
+
+.kb-reset-btn:hover {
+    color: var(--foreground);
+}
+
+.conflict-warning {
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.keybindings-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 0.75rem;
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.keybindings-footer-right {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.kb-reset-all-btn,
+.kb-cancel-btn,
+.kb-apply-btn {
+    padding: 0.4rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--foreground);
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.kb-reset-all-btn:hover,
+.kb-cancel-btn:hover {
+    background: var(--secondary);
+    border-color: var(--muted-foreground);
+}
+
+.kb-apply-btn {
+    background: var(--info);
+    color: var(--secondary);
+    border-color: var(--info);
+}
+
+.kb-apply-btn:hover {
+    opacity: 0.9;
+}
+
 /* =========================================
    Command Mode Bar (k9s-style ":" commands)
    ========================================= */

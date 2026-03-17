@@ -16,6 +16,9 @@ pub struct PortForwardsListProps {
     pub on_select: EventHandler<ActivePortForward>,
     /// Callback when user wants to stop a forward
     pub on_stop: EventHandler<String>, // forward ID
+    /// Remappable keybindings
+    #[props(default)]
+    pub keybindings: ks_plugin::KeyBindings,
 }
 
 #[component]
@@ -33,14 +36,14 @@ pub fn PortForwardsList(props: PortForwardsListProps) -> Element {
 
             // Hint text
             div { class: "drilldown-hint",
-                "Use ↑↓ to navigate • Ctrl+D to stop • Esc to go back"
+                {format!("Use ↑↓ to navigate • {} to stop • Esc to go back", props.keybindings.display("delete"))}
             }
 
             if is_empty {
                 div { class: "empty-state",
                     div { class: "empty-icon", ArrowLeftRight { size: 20 } }
                     div { class: "empty-title", "No Active Port Forwards" }
-                    div { class: "empty-hint", "Press 'f' on a pod to create a port-forward" }
+                    div { class: "empty-hint", {format!("Press '{}' on a pod to create a port-forward", props.keybindings.display("port_forward"))} }
                 }
             } else {
                 // Table - matches drilldown table style
