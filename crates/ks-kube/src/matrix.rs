@@ -38,6 +38,37 @@ pub enum MessagePart {
     Thinking(String),
 }
 
+// ---------------------------------------------------------------------------
+// Consent types
+// ---------------------------------------------------------------------------
+
+/// Action for a consent decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConsentAction {
+    Approve,
+    Deny,
+}
+
+/// Approval mode when action is Approve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ConsentMode {
+    Once,
+    Always,
+}
+
+/// A single consent decision for a tool call.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConsentDecision {
+    pub action: ConsentAction,
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ConsentMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// A single chat message.
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -156,6 +187,11 @@ pub trait ChatClient: Send + Sync {
         agent_id: Option<&str>,
     ) -> anyhow::Result<Vec<ConversationInfo>>;
     async fn delete_conversation(&self, conversation_id: &str) -> anyhow::Result<()>;
+    async fn resolve_consent(
+        &self,
+        conversation_id: &str,
+        decisions: Vec<ConsentDecision>,
+    ) -> anyhow::Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,14 +440,25 @@ fn parse_message_parts(parts_json: &[serde_json::Value]) -> (String, Vec<Message
                     .get("arguments")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                result: tc
-                    .get("result")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                error: tc
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                result: tc.get("result").and_then(|v| {
+                    if let Some(s) = v.as_str() {
+                        Some(s.to_string())
+                    } else if v.is_null() {
+                        None
+                    } else {
+                        // Backend may return result as JSON object
+                        Some(serde_json::to_string_pretty(v).unwrap_or_default())
+                    }
+                }),
+                error: tc.get("error").and_then(|v| {
+                    if let Some(s) = v.as_str() {
+                        Some(s.to_string())
+                    } else if v.is_null() {
+                        None
+                    } else {
+                        Some(serde_json::to_string_pretty(v).unwrap_or_default())
+                    }
+                }),
                 status: tc
                     .get("status")
                     .and_then(|v| v.as_str())
@@ -989,6 +1036,69 @@ impl ChatClient for MatrixChatClient {
                 .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
                 .collect();
             anyhow::bail!("GraphQL errors: {}", msgs.join(", "));
+        }
+
+        Ok(())
+    }
+
+    async fn resolve_consent(
+        &self,
+        conversation_id: &str,
+        decisions: Vec<ConsentDecision>,
+    ) -> anyhow::Result<()> {
+        if self.auth_token.is_none() {
+            anyhow::bail!("Auth token required");
+        }
+
+        let query = r#"
+            mutation ResolveConsent($input: ResolveConsentInput!) {
+                resolveConsent(input: $input) {
+                    success
+                    message
+                }
+            }
+        "#;
+
+        let input = serde_json::json!({
+            "conversationId": conversation_id,
+            "decisions": decisions,
+        });
+
+        let resp = self
+            .authed_post()
+            .json(&serde_json::json!({
+                "query": query,
+                "variables": { "input": input },
+                "operationName": "ResolveConsent",
+            }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("ResolveConsent failed: {} - {}", status, body);
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        if let Some(errors) = body.get("errors").and_then(|e| e.as_array()) {
+            let msgs: Vec<_> = errors
+                .iter()
+                .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
+                .collect();
+            anyhow::bail!("GraphQL errors: {}", msgs.join(", "));
+        }
+
+        // Check the success field in the response
+        if let Some(data) = body.get("data").and_then(|d| d.get("resolveConsent")) {
+            let success = data
+                .get("success")
+                .and_then(|s| s.as_bool())
+                .unwrap_or(true);
+            let message = data.get("message").and_then(|m| m.as_str()).unwrap_or("");
+            if !success {
+                tracing::warn!("resolveConsent returned success=false: {}", message);
+            }
         }
 
         Ok(())

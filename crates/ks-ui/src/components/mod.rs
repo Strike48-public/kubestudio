@@ -22,6 +22,7 @@ pub mod resource_list;
 pub mod service_pods_drilldown;
 pub mod sidebar;
 pub mod templates;
+pub mod tool_confirm_modal;
 pub mod workload_pods_drilldown;
 pub mod yaml_viewer;
 
@@ -46,5 +47,6 @@ pub use pvc_pods_drilldown::PvcPodsDrillDown;
 pub use resource_list::{ResourceItem, ResourceList, SortDirection, SortState};
 pub use service_pods_drilldown::ServicePodsDrillDown;
 pub use sidebar::{Sidebar, get_all_sidebar_items, get_all_sidebar_items_with_crds};
+pub use tool_confirm_modal::{ConsentResult, PendingToolCall, ToolConsentBar, ToolConsentChoice};
 pub use workload_pods_drilldown::WorkloadPodsDrillDown;
 pub use yaml_viewer::YamlViewer;
