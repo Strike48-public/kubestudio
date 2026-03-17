@@ -1970,7 +1970,7 @@ async fn main() -> anyhow::Result<()> {
     // make the instance_id unique per cluster so Matrix doesn't round-robin
     // between connectors targeting different clusters.
     let default_cluster_name: Option<String> = match auth::load_kubeconfig(None).await {
-        Ok(kc) => auth::current_context(&kc),
+        Ok(kc) => auth::current_context(&kc).filter(|s| !s.is_empty()),
         Err(_) => None,
     };
 
