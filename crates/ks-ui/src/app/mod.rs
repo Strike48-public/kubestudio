@@ -63,6 +63,7 @@ pub fn App() -> Element {
     let mut previous_view = use_signal(|| "overview".to_string());
     let mut loading = use_signal(|| true);
     let mut error_message = use_signal(|| None::<String>);
+    let mut plugin_error = use_signal(|| None::<String>);
     let mut available_contexts = use_signal(Vec::<Context>::new);
     let mut focus_search = use_signal(|| false);
     let mut search_is_focused = use_signal(|| false);
@@ -598,9 +599,15 @@ pub fn App() -> Element {
                         continue;
                     }
 
-                    // Build template context
+                    // Build template context — prefer global ns, fall back to resource's ns
+                    let ns = selected_namespace.read().clone().or_else(|| {
+                        selected_resource
+                            .read()
+                            .as_ref()
+                            .and_then(|r| r.namespace.clone())
+                    });
                     let ctx = ks_plugin::TemplateContext {
-                        namespace: selected_namespace.read().clone(),
+                        namespace: ns,
                         name: selected_resource.read().as_ref().map(|r| r.name.clone()),
                         kind: Some(current_kind.clone()),
                         context: cluster.read().as_ref().map(|c| c.context_name.clone()),
@@ -609,6 +616,7 @@ pub fn App() -> Element {
                     // Execute the hotkey command
                     if let Err(err) = ks_plugin::execute_hotkey(hotkey, &ctx) {
                         tracing::error!("Failed to execute custom hotkey: {}", err);
+                        plugin_error.set(Some(format!("Plugin hotkey failed: {}", err)));
                     }
                     e.stop_propagation();
                     e.prevent_default();
@@ -925,9 +933,13 @@ pub fn App() -> Element {
                     }));
                     is_force_delete.set(true);
                     delete_modal_open.set(true);
-                } else {
-                    command_palette_open.set(true);
                 }
+                e.stop_propagation();
+                e.prevent_default();
+            }
+            // Ctrl+I = Command palette
+            Key::Character(ref c) if c == "i" && e.modifiers().ctrl() => {
+                command_palette_open.set(true);
                 e.stop_propagation();
                 e.prevent_default();
             }
@@ -1688,6 +1700,15 @@ pub fn App() -> Element {
             }
 
             main { class: "main-content",
+                // Plugin error toast (dismissible, shown above top bar)
+                if let Some(err) = plugin_error.read().clone() {
+                    div {
+                        class: "plugin-error-toast",
+                        onclick: move |_| plugin_error.set(None),
+                        span { "{err}" }
+                        span { class: "plugin-error-dismiss", "  ✕" }
+                    }
+                }
                 // Top bar: hotkeys on left, action buttons on right
                 div { class: "top-bar",
                     HotkeysBar {
@@ -3261,7 +3282,15 @@ pub fn App() -> Element {
             CommandPalette {
                 open: command_palette_open(),
                 commands: commands,
-                on_close: move |_| command_palette_open.set(false),
+                on_close: move |_| {
+                    command_palette_open.set(false);
+                    // Refocus the app container so keyboard shortcuts work immediately
+                    if let Some(app_ref) = app_container_ref.read().clone() {
+                        spawn(async move {
+                            let _ = app_ref.set_focus(true).await;
+                        });
+                    }
+                },
                 on_select: move |cmd_id: String| {
                     tracing::info!("Command selected: {}", cmd_id);
 
@@ -3269,14 +3298,37 @@ pub fn App() -> Element {
                     if let Some(tool_name) = cmd_id.strip_prefix("tool:") {
                         let config = plugin_config.read();
                         if let Some(tool) = config.tools.iter().find(|t| t.name == tool_name) {
+                            let kind = match current_view.read().as_str() {
+                                "pods" => Some("Pod".to_string()),
+                                "deployments" => Some("Deployment".to_string()),
+                                "services" => Some("Service".to_string()),
+                                "statefulsets" => Some("StatefulSet".to_string()),
+                                "daemonsets" => Some("DaemonSet".to_string()),
+                                "jobs" => Some("Job".to_string()),
+                                "cronjobs" => Some("CronJob".to_string()),
+                                "configmaps" => Some("ConfigMap".to_string()),
+                                "secrets" => Some("Secret".to_string()),
+                                "endpoints" => Some("Endpoints".to_string()),
+                                "ingresses" => Some("Ingress".to_string()),
+                                "nodes" => Some("Node".to_string()),
+                                "events" => Some("Event".to_string()),
+                                v if v.starts_with("crd:") => selected_crd.read().as_ref().map(|c| c.kind.clone()),
+                                _ => None,
+                            };
+                            // Use the global namespace filter, or fall back to the
+                            // selected resource's own namespace (for "All Namespaces" mode)
+                            let ns = selected_namespace.read().clone().or_else(|| {
+                                selected_resource.read().as_ref().and_then(|r| r.namespace.clone())
+                            });
                             let ctx = ks_plugin::TemplateContext {
-                                namespace: selected_namespace.read().clone(),
+                                namespace: ns,
                                 name: selected_resource.read().as_ref().map(|r| r.name.clone()),
-                                kind: None,
+                                kind,
                                 context: cluster.read().as_ref().map(|c| c.context_name.clone()),
                             };
                             if let Err(err) = ks_plugin::execute_tool(tool, &ctx) {
                                 tracing::error!("Failed to launch tool {}: {}", tool_name, err);
+                                plugin_error.set(Some(format!("Failed to launch {}: {}", tool_name, err)));
                             }
                         }
                         return;
@@ -3692,7 +3744,7 @@ pub fn App() -> Element {
                                     div { class: "help-row", kbd { "/" } span { "Search" } }
                                     div { class: "help-row", kbd { "n" } span { "Namespace selector" } }
                                     div { class: "help-row", kbd { "^b" } span { "Toggle sidebar" } }
-                                    div { class: "help-row", kbd { "^k" } span { "Command palette" } }
+                                    div { class: "help-row", kbd { "^i" } span { "Command palette" } }
                                     div { class: "help-row", kbd { "?" } span { "This help" } }
                                 }
                             }

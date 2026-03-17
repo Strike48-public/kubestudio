@@ -10,7 +10,7 @@ pub mod config;
 pub mod executor;
 
 pub use config::{Alias, CustomHotkey, ExternalTool, PluginConfig, PluginError, TemplateContext};
-pub use executor::{ParsedHotkey, execute_hotkey, execute_tool};
+pub use executor::{ParsedHotkey, check_command_exists, execute_hotkey, execute_tool};
 
 /// Load the plugin configuration from the default location
 pub fn load_config() -> Result<PluginConfig, PluginError> {

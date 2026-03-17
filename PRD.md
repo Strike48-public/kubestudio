@@ -75,7 +75,7 @@ Build a native desktop app that combines:
 
 ### 4.6 User Experience
 - [x] Keyboard-first navigation (vim-style optional)
-- [x] Command palette (Cmd/Ctrl+K)
+- [x] Command palette (Ctrl+I)
 - [x] Customizable themes (dark/light - dark implemented)
 - [ ] Split panes for multi-resource view
 - [x] Search/filter across all resources
@@ -113,9 +113,9 @@ Build a native desktop app that combines:
 
 **External Tool Integration:**
 - [x] Launch external terminal with kubeconfig context set
-- [x] Open k9s in current namespace (via command palette)
-- [x] Stern integration for multi-pod log tailing (via command palette)
-- [x] kubectl passthrough for advanced commands (via command palette)
+- [x] Custom plugin commands via command palette (Ctrl+I)
+- [x] Built-in echo-test plugin for pipeline validation
+- [x] echo-test and kubectl-get as built-in default plugins
 
 **Extension Points:**
 - [x] Plugin manifest format (YAML config at `~/.config/kubestudio/config.yaml`)
@@ -374,22 +374,20 @@ aliases:
 
 # Custom hotkey bindings
 hotkeys:
-  - key: "Ctrl+Shift+L"
-    command: "stern {{name}} -n {{namespace}}"
-    description: "Tail logs with stern"
+  - key: "Ctrl+Shift+K"
+    command: "kubectl describe {{kind}} {{name}} -n {{namespace}} --context {{context}}"
+    description: "Describe resource with kubectl"
     requires_selection: true
     open_terminal: true
 
-# External tools (available in command palette)
+# External tools (available in command palette via Ctrl+I)
+# Built-in defaults: echo-test, kubectl-get
+# Users can add their own tools here
 tools:
-  - name: k9s
-    command: k9s
-    args: ["--context", "{{context}}", "--namespace", "{{namespace}}"]
-    description: "Open k9s terminal UI"
-  - name: stern
-    command: stern
-    args: ["{{name}}", "--namespace", "{{namespace}}"]
-    description: "Tail logs with stern"
+  - name: my-tool
+    command: my-tool
+    args: ["--namespace", "{{namespace}}"]
+    description: "My custom tool"
 ```
 
 Template variables: `{{namespace}}`, `{{name}}`, `{{kind}}`, `{{context}}`
@@ -424,7 +422,7 @@ Template variables: `{{namespace}}`, `{{name}}`, `{{kind}}`, `{{context}}`
 - Dark theme (Catppuccin-inspired)
 - Sidebar with collapsible resource categories and keyboard navigation
 - Resizable sidebar with constraints
-- Command palette (Cmd/Ctrl+K)
+- Command palette (Ctrl+I)
 - Status bar with cluster/namespace info
 - Context-aware hotkeys bar
 - Keyboard shortcuts (k9s-style):
@@ -517,7 +515,7 @@ Template variables: `{{namespace}}`, `{{name}}`, `{{kind}}`, `{{context}}`
 - Custom resource columns via JSONPath (planned)
 - ✅ Resource aliases (e.g., `dp` → Deployments, 20+ built-in aliases)
 - ✅ Custom hotkey → shell command bindings
-- ✅ External tool launchers (k9s, stern, kubectl via command palette)
+- ✅ External tool launchers via command palette (Ctrl+I)
 
 **Productivity:** (Remaining)
 - Split panes for side-by-side comparison

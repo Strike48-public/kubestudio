@@ -40,7 +40,42 @@ pub fn execute_tool(tool: &ExternalTool, ctx: &TemplateContext) -> std::io::Resu
     let args = tool.expand_args(ctx);
     tracing::info!("Launching external tool: {} {:?}", tool.command, args);
 
+    // Pre-flight check: verify the command exists on PATH
+    if !check_command_exists(&tool.command) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "'{}' not found on PATH. Install it or remove the '{}' plugin from config.",
+                tool.command, tool.name
+            ),
+        ));
+    }
+
     open_in_terminal_with_args(&tool.command, &args)
+}
+
+/// Check whether a command exists on PATH
+pub fn check_command_exists(cmd: &str) -> bool {
+    #[cfg(unix)]
+    {
+        Command::new("which")
+            .arg(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        Command::new("where")
+            .arg(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 /// Open a command in a new terminal window
@@ -180,13 +215,40 @@ impl ParsedHotkey {
         result
     }
 
-    /// Check if this hotkey matches the given keyboard event modifiers and key
+    /// Check if this hotkey matches the given keyboard event modifiers and key.
+    ///
+    /// Only modifiers explicitly defined in the hotkey string are required.
+    /// For example, `"Ctrl+L"` requires Ctrl to be held and the key to be "L",
+    /// but does not care about Shift/Alt/Meta state. If `"Ctrl+Shift+L"` is
+    /// defined, both Ctrl and Shift must be held.
     pub fn matches(&self, key: &str, ctrl: bool, shift: bool, alt: bool, meta: bool) -> bool {
-        self.ctrl == ctrl
-            && self.shift == shift
-            && self.alt == alt
-            && self.meta == meta
-            && self.key.eq_ignore_ascii_case(key)
+        // Required modifiers must be pressed
+        if self.ctrl && !ctrl {
+            return false;
+        }
+        if self.shift && !shift {
+            return false;
+        }
+        if self.alt && !alt {
+            return false;
+        }
+        if self.meta && !meta {
+            return false;
+        }
+        // Prevent matching when extra modifiers are held that weren't specified.
+        // e.g., "L" (no modifiers) should not match Ctrl+L.
+        if !self.ctrl && ctrl {
+            return false;
+        }
+        if !self.alt && alt {
+            return false;
+        }
+        if !self.meta && meta {
+            return false;
+        }
+        // Note: we intentionally do NOT reject extra Shift, because pressing
+        // Shift is often implicit with uppercase letters and varies by platform.
+        self.key.eq_ignore_ascii_case(key)
     }
 }
 
@@ -212,10 +274,56 @@ mod tests {
     }
 
     #[test]
-    fn test_hotkey_matches() {
+    fn test_parse_hotkey_aliases() {
+        let h = ParsedHotkey::parse("Control+Option+X");
+        assert!(h.ctrl);
+        assert!(h.alt);
+        assert_eq!(h.key, "X");
+
+        let h2 = ParsedHotkey::parse("Command+S");
+        assert!(h2.meta);
+        assert_eq!(h2.key, "S");
+
+        let h3 = ParsedHotkey::parse("Super+W");
+        assert!(h3.meta);
+        assert_eq!(h3.key, "W");
+    }
+
+    #[test]
+    fn test_hotkey_matches_required_modifiers() {
         let hotkey = ParsedHotkey::parse("Ctrl+Shift+L");
+        // Exact match
         assert!(hotkey.matches("l", true, true, false, false));
         assert!(hotkey.matches("L", true, true, false, false));
+        // Missing required modifier (Shift)
         assert!(!hotkey.matches("L", true, false, false, false));
+        // Missing required modifier (Ctrl)
+        assert!(!hotkey.matches("L", false, true, false, false));
+    }
+
+    #[test]
+    fn test_hotkey_shift_tolerance() {
+        // "Ctrl+L" should match even if Shift happens to be pressed (platform variance)
+        let hotkey = ParsedHotkey::parse("Ctrl+L");
+        assert!(hotkey.matches("L", true, false, false, false));
+        assert!(hotkey.matches("L", true, true, false, false)); // extra Shift OK
+    }
+
+    #[test]
+    fn test_hotkey_rejects_extra_ctrl_alt_meta() {
+        // "L" alone should NOT match Ctrl+L
+        let hotkey = ParsedHotkey::parse("L");
+        assert!(hotkey.matches("L", false, false, false, false));
+        assert!(!hotkey.matches("L", true, false, false, false)); // extra Ctrl rejected
+        assert!(!hotkey.matches("L", false, false, true, false)); // extra Alt rejected
+        assert!(!hotkey.matches("L", false, false, false, true)); // extra Meta rejected
+    }
+
+    #[test]
+    fn test_check_command_exists() {
+        // "echo" should exist on all platforms
+        assert!(check_command_exists("echo"));
+        // nonsense command should not exist
+        assert!(!check_command_exists("kubestudio_nonexistent_command_xyz"));
     }
 }
