@@ -246,8 +246,26 @@ impl ParsedHotkey {
         if !self.meta && meta {
             return false;
         }
-        // Note: we intentionally do NOT reject extra Shift, because pressing
-        // Shift is often implicit with uppercase letters and varies by platform.
+        // Reject extra Shift for plain single-letter bindings (no modifiers)
+        // so that "c" doesn't swallow "Shift+C" which is a different binding.
+        // Tolerate extra Shift when other modifiers are specified (e.g. "Ctrl+L"
+        // still matches with Shift held) or for non-letter keys (e.g. "+" may
+        // physically require Shift on some layouts).
+        if !self.shift
+            && shift
+            && !self.ctrl
+            && !self.alt
+            && !self.meta
+            && self.key.len() == 1
+            && self
+                .key
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_alphabetic())
+                .unwrap_or(false)
+        {
+            return false;
+        }
         self.key.eq_ignore_ascii_case(key)
     }
 }
@@ -306,7 +324,19 @@ mod tests {
         // "Ctrl+L" should match even if Shift happens to be pressed (platform variance)
         let hotkey = ParsedHotkey::parse("Ctrl+L");
         assert!(hotkey.matches("L", true, false, false, false));
-        assert!(hotkey.matches("L", true, true, false, false)); // extra Shift OK
+        assert!(hotkey.matches("L", true, true, false, false)); // extra Shift OK with Ctrl
+
+        // Plain letter "c" should NOT match Shift+C (avoids conflicts with "Shift+C" bindings)
+        let hotkey2 = ParsedHotkey::parse("c");
+        assert!(hotkey2.matches("c", false, false, false, false));
+        assert!(!hotkey2.matches("C", false, true, false, false)); // extra Shift rejected for letters
+
+        // Non-letter keys should still tolerate Shift (symbols may require Shift on some layouts)
+        let hotkey3 = ParsedHotkey::parse("/");
+        assert!(hotkey3.matches("/", false, true, false, false)); // Shift OK for symbols
+
+        let hotkey4 = ParsedHotkey::parse(":");
+        assert!(hotkey4.matches(":", false, true, false, false)); // Shift OK for symbols
     }
 
     #[test]
