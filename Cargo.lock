@@ -2971,7 +2971,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3402,7 +3402,6 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
- "jsonwebtoken",
  "k8s-openapi",
  "ks-core",
  "ks-kube",
@@ -3411,11 +3410,9 @@ dependencies = [
  "kube",
  "lucide-dioxus",
  "pulldown-cmark",
- "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rfd 0.15.4",
- "rsa",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3428,7 +3425,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "urlencoding",
- "uuid",
 ]
 
 [[package]]
@@ -5519,7 +5515,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.9",
+ "rustls-webpki 0.103.10",
  "subtle",
  "zeroize",
 ]
@@ -5612,9 +5608,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.9"
+version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
+checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -6212,9 +6208,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strike48-connector"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3fa487c6c3aaef9695e4a8a629113a54da75cfa035d2c82f507bf9fb4379f03"
+checksum = "01bb7c6a409699ea7606cb59fca48ee685ad4e753382d5b75cec8afd8be7c420"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6260,9 +6256,9 @@ dependencies = [
 
 [[package]]
 name = "strike48-proto"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc6140951637676167e06614785b12db2090c7d1e97c4520800f23504764d6c3"
+checksum = "420fb873cd05b44b6a4782deee4aa4b8197d2fc4e5a1d2b0254e7577a0a435ac"
 dependencies = [
  "prost",
  "prost-types",

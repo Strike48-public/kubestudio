@@ -32,10 +32,9 @@ use strike48_connector::{
     ConnectorClient, ConnectorConfig, NavigationConfig, OttProvider, PayloadEncoding,
 };
 use strike48_proto::proto::{
-    self, ConnectorCapabilities, ExecuteResponse, HeartbeatRequest,
-    InstanceMetadata, RegisterConnectorRequest, StreamMessage, WebSocketCloseRequest,
-    WebSocketFrame, WebSocketFrameType, WebSocketOpenRequest, WebSocketOpenResponse,
-    stream_message::Message,
+    self, ConnectorCapabilities, ExecuteResponse, HeartbeatRequest, InstanceMetadata,
+    RegisterConnectorRequest, StreamMessage, WebSocketCloseRequest, WebSocketFrame,
+    WebSocketFrameType, WebSocketOpenRequest, WebSocketOpenResponse, stream_message::Message,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -1437,7 +1436,6 @@ fn build_http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-
 /// Sleep that can be interrupted by shutdown
 async fn sleep_with_shutdown(duration: tokio::time::Duration, shutdown: &AtomicBool) -> bool {
     let interval = tokio::time::Duration::from_millis(100);
@@ -1793,7 +1791,10 @@ async fn main() -> anyhow::Result<()> {
                 .await
             {
                 Ok(creds) => {
-                    tracing::info!("OTT pre-approval registration successful: {}", creds.client_id);
+                    tracing::info!(
+                        "OTT pre-approval registration successful: {}",
+                        creds.client_id
+                    );
                     ott_provider = Some(provider);
                 }
                 Err(e) => {

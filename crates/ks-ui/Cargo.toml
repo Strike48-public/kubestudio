@@ -11,7 +11,7 @@ desktop = ["dioxus/desktop", "dep:arboard", "dep:rfd"]
 fullstack = ["dioxus/fullstack", "dioxus/server"]
 liveview = ["dep:dioxus-liveview"]
 server = ["liveview", "dep:axum"]
-connector = ["liveview", "dep:strike48-connector", "dep:strike48-proto", "dep:reqwest", "dep:tokio-tungstenite", "dep:dashmap", "dep:anyhow", "dep:axum", "dep:regex", "dep:base64", "dep:rsa", "dep:rand", "dep:jsonwebtoken", "dep:uuid", "dep:urlencoding", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower-service"]
+connector = ["liveview", "dep:strike48-connector", "dep:strike48-proto", "dep:reqwest", "dep:tokio-tungstenite", "dep:dashmap", "dep:anyhow", "dep:axum", "dep:regex", "dep:base64", "dep:urlencoding", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower-service"]
 
 [lib]
 name = "ks_ui"
@@ -72,10 +72,6 @@ anyhow = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 regex = { version = "1", optional = true }
 base64 = { version = "0.22", optional = true }
-rsa = { version = "0.9", optional = true, features = ["std"] }
-rand = { version = "0.8", optional = true }
-jsonwebtoken = { version = "9", optional = true }
-uuid = { version = "1", optional = true, features = ["v4"] }
 urlencoding = { version = "2", optional = true }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
