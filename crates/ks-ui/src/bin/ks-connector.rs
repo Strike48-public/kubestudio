@@ -776,7 +776,7 @@ impl StudioKubeConnector {
                             Err(_) => data,
                         };
 
-                        let msg = WsMessage::Binary(decoded);
+                        let msg = WsMessage::Binary(decoded.into());
                         if let Err(e) = ws_sink.send(msg).await {
                             tracing::error!("Error sending to backend WS {}: {}", conn_id_write, e);
                             break;
@@ -794,7 +794,7 @@ impl StudioKubeConnector {
                                 let (frame_type, data) = match msg {
                                     WsMessage::Text(text) => (
                                         WebSocketFrameType::WebsocketFrameTypeText,
-                                        text.into_bytes(),
+                                        text.as_bytes().to_vec(),
                                     ),
                                     WsMessage::Binary(data) => (
                                         WebSocketFrameType::WebsocketFrameTypeBinary,
@@ -1620,6 +1620,9 @@ async fn run_message_loop(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install ring as the default rustls CryptoProvider (required since rustls 0.23+).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt::init();
 
     tracing::info!("Starting KubeStudio Connector");

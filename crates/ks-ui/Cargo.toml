@@ -11,7 +11,7 @@ desktop = ["dioxus/desktop", "dep:arboard", "dep:rfd"]
 fullstack = ["dioxus/fullstack", "dioxus/server"]
 liveview = ["dep:dioxus-liveview"]
 server = ["liveview", "dep:axum"]
-connector = ["liveview", "dep:strike48-connector", "dep:strike48-proto", "dep:reqwest", "dep:tokio-tungstenite", "dep:dashmap", "dep:anyhow", "dep:axum", "dep:regex", "dep:base64", "dep:urlencoding", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower-service"]
+connector = ["liveview", "dep:strike48-connector", "dep:strike48-proto", "dep:reqwest", "dep:tokio-tungstenite", "dep:dashmap", "dep:anyhow", "dep:axum", "dep:regex", "dep:base64", "dep:urlencoding", "dep:ring", "dep:rustls", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tower-service"]
 
 [lib]
 name = "ks_ui"
@@ -73,6 +73,8 @@ axum = { workspace = true, optional = true }
 regex = { version = "1", optional = true }
 base64 = { version = "0.22", optional = true }
 urlencoding = { version = "2", optional = true }
+ring = { version = "0.17", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring"] }
 hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
