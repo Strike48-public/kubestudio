@@ -55,8 +55,8 @@ tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
 dashmap = "6"
 
 # Connector SDK
-strike48-connector = "0.3.2"
-strike48-proto = "0.3.2"
+strike48-connector = "0.3.3"
+strike48-proto = "0.3.3"
 
 # Web server (for connector mode)
 axum = "0.7"
