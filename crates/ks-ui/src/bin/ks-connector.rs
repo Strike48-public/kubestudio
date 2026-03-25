@@ -20,11 +20,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use dashmap::DashMap;
 use dioxus_liveview::LiveviewRouter as _;
 use futures::{SinkExt, StreamExt};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use ks_kube::{KubeClient, PermissionMode, Toolbox, auth, cleanup_orphaned_toolbox};
-use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1::EncodeRsaPrivateKey, pkcs8::EncodePublicKey};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -32,13 +29,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use strike48_connector::{
     AppManifest, AppPageRequest, AppPageResponse, BodyEncoding, ClientOptions, ConnectorBehavior,
-    ConnectorClient, ConnectorConfig, NavigationConfig, PayloadEncoding,
+    ConnectorClient, ConnectorConfig, NavigationConfig, OttProvider, PayloadEncoding,
 };
 use strike48_proto::proto::{
-    self, ConnectorCapabilities, CredentialsIssued, ExecuteResponse, HeartbeatRequest,
-    InstanceMetadata, RegisterConnectorRequest, StreamMessage, WebSocketCloseRequest,
-    WebSocketFrame, WebSocketFrameType, WebSocketOpenRequest, WebSocketOpenResponse,
-    stream_message::Message,
+    self, ConnectorCapabilities, ExecuteResponse, HeartbeatRequest, InstanceMetadata,
+    RegisterConnectorRequest, StreamMessage, WebSocketCloseRequest, WebSocketFrame,
+    WebSocketFrameType, WebSocketOpenRequest, WebSocketOpenResponse, stream_message::Message,
 };
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -780,7 +776,7 @@ impl StudioKubeConnector {
                             Err(_) => data,
                         };
 
-                        let msg = WsMessage::Binary(decoded);
+                        let msg = WsMessage::Binary(decoded.into());
                         if let Err(e) = ws_sink.send(msg).await {
                             tracing::error!("Error sending to backend WS {}: {}", conn_id_write, e);
                             break;
@@ -798,7 +794,7 @@ impl StudioKubeConnector {
                                 let (frame_type, data) = match msg {
                                     WsMessage::Text(text) => (
                                         WebSocketFrameType::WebsocketFrameTypeText,
-                                        text.into_bytes(),
+                                        text.as_bytes().to_vec(),
                                     ),
                                     WsMessage::Binary(data) => (
                                         WebSocketFrameType::WebsocketFrameTypeBinary,
@@ -1426,319 +1422,18 @@ fn build_registration_message(
     }
 }
 
-/// Credentials returned from OTT registration
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct OttCredentials {
-    client_id: String,
-    keycloak_url: String,
-    tenant_id: String,
-}
+// Auth is handled entirely by the SDK's OttProvider which manages
+// credential storage, key generation, and token refresh.
 
-/// Get keys directory path
-fn get_keys_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("MATRIX_KEYS_DIR") {
-        return PathBuf::from(dir);
-    }
-    home_dir().join(".matrix").join("keys")
-}
-
-/// Get private key path for this connector
-fn get_private_key_path(connector_type: &str, instance_id: &str) -> PathBuf {
-    get_keys_dir().join(format!("{}_{}.pem", connector_type, instance_id))
-}
-
-/// Get credentials file path
-fn get_credentials_path(connector_type: &str, instance_id: &str) -> PathBuf {
-    home_dir()
-        .join(".matrix")
-        .join("credentials")
-        .join(format!("{}_{}.json", connector_type, instance_id))
-}
-
-/// Cross-platform home directory (uses $HOME on Unix, %USERPROFILE% on Windows).
-fn home_dir() -> PathBuf {
-    #[cfg(unix)]
-    {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-    #[cfg(windows)]
-    {
-        std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-    }
-}
-
-/// Load or generate RSA keypair for this connector
-fn get_or_create_keypair(
-    connector_type: &str,
-    instance_id: &str,
-) -> anyhow::Result<(RsaPrivateKey, String)> {
-    let key_path = get_private_key_path(connector_type, instance_id);
-
-    if key_path.exists() {
-        // Load existing keypair
-        let key_pem = fs::read_to_string(&key_path)?;
-        let private_key = rsa::pkcs1::DecodeRsaPrivateKey::from_pkcs1_pem(&key_pem)
-            .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?;
-        let public_key = RsaPublicKey::from(&private_key);
-        let public_key_pem = public_key.to_public_key_pem(rsa::pkcs8::LineEnding::LF)?;
-        tracing::info!("Loaded existing keypair from {}", key_path.display());
-        return Ok((private_key, public_key_pem));
-    }
-
-    // Generate new keypair
-    tracing::info!("Generating new RSA keypair...");
-    let mut rng = rand::thread_rng();
-    let private_key = RsaPrivateKey::new(&mut rng, 2048)?;
-    let public_key = RsaPublicKey::from(&private_key);
-
-    // Save private key
-    let keys_dir = get_keys_dir();
-    if !keys_dir.exists() {
-        fs::create_dir_all(&keys_dir)?;
-    }
-
-    let private_key_pem = private_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
-    fs::write(&key_path, private_key_pem.as_bytes())?;
-
-    // Set permissions (Unix only)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&key_path)?.permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&key_path, perms)?;
-    }
-
-    let public_key_pem = public_key.to_public_key_pem(rsa::pkcs8::LineEnding::LF)?;
-    tracing::info!("Saved new keypair to {}", key_path.display());
-
-    Ok((private_key, public_key_pem))
-}
-
-/// Save credentials to disk
-fn save_credentials(
-    connector_type: &str,
-    instance_id: &str,
-    credentials: &OttCredentials,
-) -> anyhow::Result<()> {
-    let creds_path = get_credentials_path(connector_type, instance_id);
-    if let Some(parent) = creds_path.parent()
-        && !parent.exists()
-    {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(credentials)?;
-    fs::write(&creds_path, json)?;
-    tracing::info!("Saved credentials to {}", creds_path.display());
-    Ok(())
-}
-
-/// Load saved credentials from disk
-fn load_saved_credentials(connector_type: &str, instance_id: &str) -> Option<OttCredentials> {
-    let creds_path = get_credentials_path(connector_type, instance_id);
-    if creds_path.exists()
-        && let Ok(data) = fs::read_to_string(&creds_path)
-        && let Ok(creds) = serde_json::from_str(&data)
-    {
-        tracing::info!("Loaded saved credentials from {}", creds_path.display());
-        return Some(creds);
-    }
-    None
-}
-
-/// Create JWT client assertion for private_key_jwt authentication
-fn create_client_assertion(
-    private_key: &RsaPrivateKey,
-    credentials: &OttCredentials,
-) -> anyhow::Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let claims = serde_json::json!({
-        "iss": credentials.client_id,
-        "sub": credentials.client_id,
-        "aud": credentials.keycloak_url,
-        "exp": now + 60,
-        "iat": now,
-        "jti": uuid::Uuid::new_v4().to_string(),
-    });
-
-    let private_key_pem = private_key.to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)?;
-    let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())?;
-    let header = Header::new(Algorithm::RS256);
-
-    Ok(encode(&header, &claims, &encoding_key)?)
-}
-
-/// Build a reqwest client that respects MATRIX_TLS_INSECURE
+/// Build a reqwest client that respects MATRIX_TLS_INSECURE.
 fn build_http_client() -> reqwest::Client {
     let insecure = std::env::var("MATRIX_TLS_INSECURE")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
-
     reqwest::Client::builder()
         .danger_accept_invalid_certs(insecure)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
-}
-
-/// Get access token from Keycloak using private_key_jwt
-async fn get_access_token(
-    private_key: &RsaPrivateKey,
-    credentials: &OttCredentials,
-) -> anyhow::Result<String> {
-    let client_assertion = create_client_assertion(private_key, credentials)?;
-
-    let token_url = format!(
-        "{}/protocol/openid-connect/token",
-        credentials.keycloak_url.trim_end_matches('/')
-    );
-
-    tracing::info!("Getting access token from {}", token_url);
-
-    let client = build_http_client();
-    let response = client
-        .post(&token_url)
-        .form(&[
-            ("grant_type", "client_credentials"),
-            ("client_id", &credentials.client_id),
-            (
-                "client_assertion_type",
-                "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-            ),
-            ("client_assertion", &client_assertion),
-        ])
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        #[derive(serde::Deserialize)]
-        struct TokenResponse {
-            access_token: String,
-        }
-        let token_resp: TokenResponse = response.json().await?;
-        tracing::info!("Access token obtained successfully");
-        Ok(token_resp.access_token)
-    } else {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token request failed: {} - {}", status, body);
-    }
-}
-
-/// Register with OTT and get credentials (including client_id for JWT auth)
-async fn register_with_ott(
-    creds: &CredentialsIssued,
-    config: &ConnectorConfig,
-) -> anyhow::Result<(OttCredentials, RsaPrivateKey)> {
-    // In StrikeHub mode, always use the server-provided URL for OTT registration
-    // because STRIKE48_API_URL points to StrikeHub's local auth proxy which
-    // doesn't have the /api/connectors/register-with-ott endpoint.
-    let api_base = if std::env::var("STRIKEHUB_SOCKET").is_ok() {
-        String::new()
-    } else {
-        std::env::var("STRIKE48_API_URL").unwrap_or_default()
-    };
-    let base_url = if api_base.is_empty() {
-        &creds.matrix_api_url
-    } else {
-        &api_base
-    };
-    let register_url = format!("{}{}", base_url, creds.register_url);
-    tracing::info!("Registering with OTT at: {}", register_url);
-
-    // Get or create RSA keypair
-    let (private_key, public_key_pem) =
-        get_or_create_keypair(&config.connector_type, &config.instance_id)?;
-
-    let payload = serde_json::json!({
-        "token": creds.ott,
-        "public_key": public_key_pem,
-        "connector_type": config.connector_type,
-        "instance_id": config.instance_id,
-    });
-
-    tracing::debug!(
-        "OTT registration payload: connector_type={}, instance_id={}",
-        config.connector_type,
-        config.instance_id
-    );
-
-    let client = build_http_client();
-
-    // Retry logic for cluster sync delays
-    const MAX_RETRIES: u32 = 4;
-    let mut last_error = String::new();
-
-    for attempt in 0..MAX_RETRIES {
-        if attempt > 0 {
-            let delay = std::cmp::min(500 * 2_u64.pow(attempt - 1), 3000);
-            tracing::warn!(
-                "OTT registration retry {}/{} after {}ms",
-                attempt + 1,
-                MAX_RETRIES,
-                delay
-            );
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-        }
-
-        let response = match client.post(&register_url).json(&payload).send().await {
-            Ok(resp) => resp,
-            Err(e) => {
-                last_error = format!("HTTP request failed: {}", e);
-                continue;
-            }
-        };
-
-        if response.status().is_success() {
-            let credentials: OttCredentials = response.json().await?;
-
-            // Save credentials to disk
-            save_credentials(&config.connector_type, &config.instance_id, &credentials)?;
-
-            return Ok((credentials, private_key));
-        }
-
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-
-        if status.as_u16() == 401 && body.contains("Invalid or expired") {
-            // Possible cluster sync delay - retry
-            last_error = body;
-            continue;
-        }
-
-        anyhow::bail!(
-            "Registration failed: {} {} - URL: {} - Body: {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("Unknown"),
-            register_url,
-            if body.is_empty() {
-                "(empty response)"
-            } else {
-                &body
-            }
-        );
-    }
-
-    anyhow::bail!(
-        "Registration failed after {} retries: {}",
-        MAX_RETRIES,
-        last_error
-    );
-}
-
-/// Auth context for reconnection
-struct AuthContext {
-    credentials: OttCredentials,
-    private_key: RsaPrivateKey,
 }
 
 /// Sleep that can be interrupted by shutdown
@@ -1755,14 +1450,13 @@ async fn sleep_with_shutdown(duration: tokio::time::Duration, shutdown: &AtomicB
     false // Normal completion
 }
 
-/// Result of message loop - whether to reconnect and with what auth
-#[allow(clippy::large_enum_variant)]
+/// Result of message loop — why the stream ended.
 enum MessageLoopResult {
-    /// Stream closed normally or shutdown requested
+    /// Stream closed normally or shutdown requested.
     Exit,
-    /// Need to reconnect with new credentials
-    Reconnect(AuthContext),
-    /// Registration rejected due to invalid/untrusted JWT credentials
+    /// Post-approval credentials received; reconnect with JWT.
+    Reconnect,
+    /// Registration rejected due to invalid/untrusted JWT credentials.
     AuthFailure,
 }
 
@@ -1770,8 +1464,9 @@ enum MessageLoopResult {
 async fn run_message_loop(
     connector: Arc<StudioKubeConnector>,
     mut rx: mpsc::UnboundedReceiver<StreamMessage>,
-    config: &ConnectorConfig,
+    config: &mut ConnectorConfig,
     shutdown: &AtomicBool,
+    ott_provider: &mut Option<OttProvider>,
 ) -> MessageLoopResult {
     // Application-level heartbeat interval (30s) to keep the server session alive.
     // The server reaps sessions after 90s of inactivity. HTTP/2 PING frames do NOT
@@ -1859,26 +1554,59 @@ async fn run_message_loop(
                     }
                     Some(Message::CredentialsIssued(creds)) => {
                         tracing::info!(
-                            "Received CredentialsIssued - attempting OTT registration (api_url={}, register_url={})",
+                            "Received CredentialsIssued (api_url={}, register_url={})",
                             creds.matrix_api_url,
                             creds.register_url
                         );
 
-                        match register_with_ott(&creds, config).await {
-                            Ok((credentials, private_key)) => {
-                                tracing::info!("OTT registration successful, will reconnect with JWT");
-                                return MessageLoopResult::Reconnect(AuthContext {
-                                    credentials,
-                                    private_key,
-                                });
+                        // In StrikeHub mode, STRIKE48_API_URL points to the local
+                        // proxy which doesn't handle /api/connectors/register-with-ott,
+                        // so always use the server-provided URL.  In standalone mode,
+                        // prefer STRIKE48_API_URL if set.
+                        let api_url = if std::env::var("STRIKEHUB_SOCKET").is_ok() {
+                            creds.matrix_api_url.clone()
+                        } else {
+                            std::env::var("STRIKE48_API_URL")
+                                .ok()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or_else(|| creds.matrix_api_url.clone())
+                        };
+
+                        let mut provider = OttProvider::new(
+                            Some(config.connector_type.clone()),
+                            Some(config.instance_id.clone()),
+                        );
+
+                        match provider
+                            .register_public_key_with_ott_data(
+                                &creds.ott,
+                                &api_url,
+                                &creds.register_url,
+                                &config.connector_type,
+                                Some(&config.instance_id),
+                            )
+                            .await
+                        {
+                            Ok(resp) => {
+                                tracing::info!("OTT registration successful: {}", resp.client_id);
+                                match provider.get_token().await {
+                                    Ok(token) => {
+                                        tracing::info!("Got JWT via OttProvider, will reconnect");
+                                        config.auth_token = token;
+                                        *ott_provider = Some(provider);
+                                        return MessageLoopResult::Reconnect;
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("OTT registration succeeded but get_token() failed: {}", e);
+                                    }
+                                }
                             }
                             Err(e) => {
                                 tracing::error!(
-                                    "OTT registration failed: {} (matrix_api_url={}, register_url={}, STRIKE48_API_URL={:?})",
+                                    "OTT registration failed: {} (api_url={}, register_url={})",
                                     e,
-                                    creds.matrix_api_url,
+                                    api_url,
                                     creds.register_url,
-                                    std::env::var("STRIKE48_API_URL").ok()
                                 );
                             }
                         }
@@ -1892,6 +1620,9 @@ async fn run_message_loop(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install ring as the default rustls CryptoProvider (required since rustls 0.23+).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt::init();
 
     tracing::info!("Starting KubeStudio Connector");
@@ -2046,26 +1777,46 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Try to load saved credentials first
-    let mut auth_context: Option<AuthContext> = None;
+    // SDK OttProvider handles saved credentials, OTT pre-approval,
+    // key management, and token refresh — matching pick's pattern.
+    let mut ott_provider: Option<OttProvider> = None;
+    {
+        let mut provider = OttProvider::new(
+            Some(config.connector_type.clone()),
+            Some(config.instance_id.clone()),
+        );
 
-    if let Some(saved_creds) = load_saved_credentials(&config.connector_type, &config.instance_id) {
-        // Check if we have a corresponding private key
-        let key_path = get_private_key_path(&config.connector_type, &config.instance_id);
-        if key_path.exists()
-            && let Ok(key_pem) = fs::read_to_string(&key_path)
-            && let Ok(private_key) = rsa::pkcs1::DecodeRsaPrivateKey::from_pkcs1_pem(&key_pem)
+        if provider.has_ott() {
+            // Pre-approval OTT from StrikeHub (STRIKE48_REGISTRATION_TOKEN).
+            tracing::info!("Pre-approval OTT detected, attempting registration via SDK");
+            match provider
+                .register_with_ott(&config.connector_type, Some(&config.instance_id))
+                .await
+            {
+                Ok(creds) => {
+                    tracing::info!(
+                        "OTT pre-approval registration successful: {}",
+                        creds.client_id
+                    );
+                    ott_provider = Some(provider);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "OTT pre-approval registration failed: {}. \
+                         Falling through to gRPC registration (will require admin approval).",
+                        e
+                    );
+                }
+            }
+        } else if provider
+            .load_saved_credentials(&config.connector_type, Some(&config.instance_id))
+            .is_some()
         {
-            tracing::info!("Loaded saved credentials, will use JWT authentication");
-            auth_context = Some(AuthContext {
-                credentials: saved_creds,
-                private_key,
-            });
+            tracing::info!("Loaded saved credentials via SDK OttProvider");
+            ott_provider = Some(provider);
         }
     }
 
-    // Track consecutive auth failures so we can clear stale credentials
-    // and fall back to fresh OTT registration instead of looping forever.
     let mut consecutive_auth_failures: u32 = 0;
     const MAX_AUTH_FAILURES: u32 = 3;
 
@@ -2075,23 +1826,20 @@ async fn main() -> anyhow::Result<()> {
             break;
         }
 
-        // Get JWT token if we have credentials
-        let jwt_token = if let Some(ref ctx) = auth_context {
-            match get_access_token(&ctx.private_key, &ctx.credentials).await {
+        // Get fresh JWT via SDK OttProvider (handles private_key_jwt + caching).
+        if let Some(ref mut provider) = ott_provider {
+            match provider.get_token().await {
                 Ok(token) => {
-                    tracing::info!("Got access token from Keycloak");
-                    Some(token)
+                    tracing::info!("Got JWT via OttProvider (len={})", token.len());
+                    config.auth_token = token;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to get access token: {}", e);
-                    // Clear auth context and try fresh registration
-                    auth_context = None;
-                    None
+                    tracing::warn!("Failed to get JWT from OttProvider: {}", e);
+                    config.auth_token.clear();
+                    ott_provider = None;
                 }
             }
-        } else {
-            None
-        };
+        }
 
         // Create client and connect (SDK auto-detects transport from URL scheme)
         #[allow(deprecated)]
@@ -2110,10 +1858,10 @@ async fn main() -> anyhow::Result<()> {
 
         tracing::info!("Connected to Matrix, starting stream...");
 
-        // Build registration message (with JWT if we have one)
+        // Build registration message — config.auth_token is set by OttProvider above.
         let registration_msg = build_registration_message(
             &config,
-            jwt_token.as_deref(),
+            None,
             default_cluster_name.as_deref(),
             explicit_connector_name.as_deref(),
         );
@@ -2142,11 +1890,10 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Waiting for registration response...");
 
         // Run message loop
-        match run_message_loop(connector, rx, &config, &shutdown).await {
-            MessageLoopResult::Reconnect(ctx) => {
+        match run_message_loop(connector, rx, &mut config, &shutdown, &mut ott_provider).await {
+            MessageLoopResult::Reconnect => {
                 consecutive_auth_failures = 0;
                 tracing::info!("Reconnecting with JWT authentication...");
-                auth_context = Some(ctx);
                 if sleep_with_shutdown(tokio::time::Duration::from_millis(500), &shutdown).await {
                     break;
                 }
@@ -2158,19 +1905,8 @@ async fn main() -> anyhow::Result<()> {
                         "Registration rejected {} times in a row — clearing stale credentials and retrying fresh",
                         consecutive_auth_failures,
                     );
-                    // Remove saved credentials and keypair so the next
-                    // iteration falls through to post-approval OTT flow.
-                    let creds_path =
-                        get_credentials_path(&config.connector_type, &config.instance_id);
-                    let key_path =
-                        get_private_key_path(&config.connector_type, &config.instance_id);
-                    if creds_path.exists() {
-                        let _ = fs::remove_file(&creds_path);
-                    }
-                    if key_path.exists() {
-                        let _ = fs::remove_file(&key_path);
-                    }
-                    auth_context = None;
+                    ott_provider = None;
+                    config.auth_token.clear();
                     consecutive_auth_failures = 0;
                 } else {
                     tracing::warn!(
@@ -2188,14 +1924,12 @@ async fn main() -> anyhow::Result<()> {
                 if shutdown.load(Ordering::SeqCst) {
                     break;
                 }
-                if auth_context.is_some() {
-                    // We have credentials, so reconnect on disconnect
+                if ott_provider.is_some() {
                     tracing::info!("Connection closed, reconnecting...");
                     if sleep_with_shutdown(tokio::time::Duration::from_secs(2), &shutdown).await {
                         break;
                     }
                 } else {
-                    // No credentials, exit
                     break;
                 }
             }

@@ -49,14 +49,14 @@ dirs = "5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # WebSocket (for connector proxy)
-tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 # Concurrent map (for WS connection tracking)
 dashmap = "6"
 
-# Connector SDK
-strike48-connector = "0.3.1"
-strike48-proto = "0.3.1"
+# Strike48 Connector SDK
+strike48-connector = "0.3.4"
+strike48-proto = "0.3.4"
 
 # Web server (for connector mode)
 axum = "0.7"
