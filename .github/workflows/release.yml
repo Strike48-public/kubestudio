@@ -109,7 +109,7 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
           # Decode certificate
-          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > $RUNNER_TEMP/certificate.p12
 
           # Create and configure temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
@@ -246,7 +246,7 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
           # Decode certificate
-          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > $RUNNER_TEMP/certificate.p12
 
           # Create and configure temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
