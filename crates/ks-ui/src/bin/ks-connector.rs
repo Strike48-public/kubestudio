@@ -1627,6 +1627,10 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting KubeStudio Connector");
     tracing::info!("================================");
+    tracing::info!(
+        "MATRIX_TLS_INSECURE={}",
+        std::env::var("MATRIX_TLS_INSECURE").unwrap_or_else(|_| "<unset>".to_string())
+    );
 
     // Build IPC address: StrikeHub provides a Unix socket path, otherwise PID-based
     let is_strikehub_mode;
