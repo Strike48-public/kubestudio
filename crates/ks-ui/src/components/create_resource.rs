@@ -199,13 +199,12 @@ pub fn CreateResource(props: CreateResourceProps) -> Element {
                         // Textarea handles its own input (arrow keys, typing, etc.)
                         e.stop_propagation();
                     }
-                    CreateState::Success(_) | CreateState::Error(_) => {
-                        if crate::utils::is_escape(&e) || e.key() == Key::Enter {
+                    CreateState::Success(_) | CreateState::Error(_)
+                        if (crate::utils::is_escape(&e) || e.key() == Key::Enter) => {
                             on_close.call(());
                             e.stop_propagation();
                             e.prevent_default();
                         }
-                    }
                     _ => {}
                 }
             },
