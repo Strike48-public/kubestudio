@@ -139,14 +139,25 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Notarization requires a zip
           ditto -c -k --keepParent target/${{ matrix.target }}/release/kubestudio $RUNNER_TEMP/kubestudio.zip
-
-          xcrun notarytool submit $RUNNER_TEMP/kubestudio.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+          for attempt in 1 2 3; do
+            echo "Notarization attempt $attempt..."
+            if xcrun notarytool submit $RUNNER_TEMP/kubestudio.zip \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait --timeout 30m; then
+              echo "Notarization succeeded."
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Notarization failed, retrying in 30s..."
+              sleep 30
+            else
+              echo "Notarization failed after $attempt attempts."
+              exit 1
+            fi
+          done
 
       - name: Sign Windows binary
         if: runner.os == 'Windows'
@@ -277,12 +288,24 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           ditto -c -k --keepParent target/${{ matrix.target }}/release/ks-connector $RUNNER_TEMP/ks-connector.zip
-
-          xcrun notarytool submit $RUNNER_TEMP/ks-connector.zip \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+          for attempt in 1 2 3; do
+            echo "Notarization attempt $attempt..."
+            if xcrun notarytool submit $RUNNER_TEMP/ks-connector.zip \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait --timeout 30m; then
+              echo "Notarization succeeded."
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Notarization failed, retrying in 30s..."
+              sleep 30
+            else
+              echo "Notarization failed after $attempt attempts."
+              exit 1
+            fi
+          done
 
       - name: Sign Windows binary
         if: runner.os == 'Windows'
