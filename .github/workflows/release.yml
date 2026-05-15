@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      macos_signing:
+        description: 'Enable macOS code signing & notarization (requires active Apple developer account)'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -100,7 +107,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --features desktop
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -123,7 +130,7 @@ jobs:
           security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
 
       - name: Sign macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -133,7 +140,7 @@ jobs:
             target/${{ matrix.target }}/release/kubestudio
 
       - name: Notarize macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -248,7 +255,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --bin ks-connector --features connector --no-default-features -p ks-ui
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -271,7 +278,7 @@ jobs:
           security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
 
       - name: Sign macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -281,7 +288,7 @@ jobs:
             target/${{ matrix.target }}/release/ks-connector
 
       - name: Notarize macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing == true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
