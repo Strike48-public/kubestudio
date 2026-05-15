@@ -65,7 +65,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: kubestudio-linux-x86_64
             name: Linux x86_64
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: kubestudio-darwin-x86_64
             name: macOS x86_64
@@ -213,7 +213,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: ks-connector-linux-x86_64
             name: Linux x86_64
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: ks-connector-darwin-x86_64
             name: macOS x86_64
