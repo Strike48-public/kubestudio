@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      # TEMPORARY: macOS signing disabled by default during Apple developer account suspension.
+      # TODO: Change default back to true once account is restored.
+      macos_signing:
+        description: 'Enable macOS code signing & notarization (default: false due to account suspension)'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -58,7 +67,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: kubestudio-linux-x86_64
             name: Linux x86_64
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: kubestudio-darwin-x86_64
             name: macOS x86_64
@@ -100,7 +109,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --features desktop
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -123,7 +132,7 @@ jobs:
           security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
 
       - name: Sign macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -133,7 +142,7 @@ jobs:
             target/${{ matrix.target }}/release/kubestudio
 
       - name: Notarize macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -206,7 +215,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: ks-connector-linux-x86_64
             name: Linux x86_64
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: ks-connector-darwin-x86_64
             name: macOS x86_64
@@ -248,7 +257,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --bin ks-connector --features connector --no-default-features -p ks-ui
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -271,7 +280,7 @@ jobs:
           security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
 
       - name: Sign macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -281,7 +290,7 @@ jobs:
             target/${{ matrix.target }}/release/ks-connector
 
       - name: Notarize macOS binary
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && inputs.macos_signing
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
