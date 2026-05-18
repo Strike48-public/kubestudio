@@ -2,10 +2,8 @@ name: Multi-Arch Docker
 
 on:
   push:
-    branches: [main, feat/multi-arch-scratch-image]
-    tags: ['v*']
-  pull_request:
     branches: [main]
+    tags: ['v*']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
