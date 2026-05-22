@@ -163,14 +163,16 @@ pub fn App() -> Element {
     // Keybindings modal state
     let mut keybindings_modal_open = use_signal(|| false);
 
-    // Theme state — class-based dark/light toggle
+    // Theme state — data-theme attribute toggle (Strike48 design system)
     let mut is_dark = use_signal(|| true);
 
     // Sync is_dark with the actual DOM state on mount
     use_effect(move || {
         spawn(async move {
-            if let Ok(val) =
-                document::eval("return document.documentElement.classList.contains('dark')").await
+            if let Ok(val) = document::eval(
+                "return document.documentElement.getAttribute('data-theme') === 'strike48'",
+            )
+            .await
                 && let Some(dark) = val.as_bool()
             {
                 is_dark.set(dark);
@@ -185,11 +187,11 @@ pub fn App() -> Element {
         spawn(async move {
             if new_dark {
                 let _ = document::eval(
-                    "document.documentElement.classList.add('dark'); localStorage.setItem('theme','dark');"
+                    "document.documentElement.setAttribute('data-theme', 'strike48'); localStorage.setItem('theme','dark');"
                 ).await;
             } else {
                 let _ = document::eval(
-                    "document.documentElement.classList.remove('dark'); localStorage.setItem('theme','light');"
+                    "document.documentElement.setAttribute('data-theme', 'strike48-light'); localStorage.setItem('theme','light');"
                 ).await;
             }
         });
