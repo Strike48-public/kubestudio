@@ -99,6 +99,75 @@ pub struct ConversationInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Token usage tracking
+// ---------------------------------------------------------------------------
+
+/// Per-period rate limit status returned by the Matrix `tokenUsageStats` query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenUsageStatus {
+    /// Token usage tracking is disabled for this user/tenant.
+    Disabled,
+    /// User or tenant is exempt from rate limiting.
+    Exempt,
+    /// Usage is within normal range.
+    Ok,
+    /// Usage has crossed the warning threshold but not the hard limit.
+    Warning,
+    /// Usage has reached or exceeded the hard limit — requests will be rejected.
+    Exceeded,
+    /// Any value the server returns that we don't recognize.
+    Unknown,
+}
+
+impl std::str::FromStr for TokenUsageStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_uppercase().as_str() {
+            "DISABLED" => Self::Disabled,
+            "EXEMPT" => Self::Exempt,
+            "OK" => Self::Ok,
+            "WARNING" => Self::Warning,
+            "EXCEEDED" => Self::Exceeded,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// Usage + limit for a single time period (daily / weekly / monthly).
+#[derive(Debug, Clone, Copy)]
+pub struct TokenUsagePeriod {
+    pub usage: i64,
+    pub limit: Option<i64>,
+    pub status: TokenUsageStatus,
+}
+
+/// Snapshot of the current user's token usage across the three tracked periods.
+#[derive(Debug, Clone, Copy)]
+pub struct TokenUsageStats {
+    pub daily: TokenUsagePeriod,
+    pub weekly: TokenUsagePeriod,
+    pub monthly: TokenUsagePeriod,
+    pub is_limited: bool,
+}
+
+impl TokenUsageStats {
+    /// Return the first period (daily → weekly → monthly) whose status is
+    /// `Exceeded`, if any. This is the period the operator most likely hit.
+    pub fn first_exceeded(&self) -> Option<(&'static str, TokenUsagePeriod)> {
+        if self.daily.status == TokenUsageStatus::Exceeded {
+            Some(("daily", self.daily))
+        } else if self.weekly.status == TokenUsageStatus::Exceeded {
+            Some(("weekly", self.weekly))
+        } else if self.monthly.status == TokenUsageStatus::Exceeded {
+            Some(("monthly", self.monthly))
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
 
@@ -192,6 +261,13 @@ pub trait ChatClient: Send + Sync {
         conversation_id: &str,
         decisions: Vec<ConsentDecision>,
     ) -> anyhow::Result<()>;
+
+    /// Fetch the current user's per-period token usage and limits.
+    ///
+    /// Returns `Ok(None)` when the server does not expose `tokenUsageStats`
+    /// (e.g. older Matrix versions, or when feature-flagged off). The caller
+    /// should treat a missing stat as "no information" rather than an error.
+    async fn get_token_usage_stats(&self) -> anyhow::Result<Option<TokenUsageStats>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +323,12 @@ impl MatrixChatClient {
 
     pub fn set_auth_token(&mut self, token: impl Into<String>) {
         self.auth_token = Some(token.into());
+    }
+
+    /// Base Matrix API URL the client is talking to (e.g. `https://studio.example`).
+    /// Exposed so the UI can derive a Studio web URL for "Open Studio" links.
+    pub fn api_url(&self) -> &str {
+        &self.api_url
     }
 
     /// Build a POST request to the GraphQL endpoint with Bearer auth.
@@ -1102,5 +1184,89 @@ impl ChatClient for MatrixChatClient {
         }
 
         Ok(())
+    }
+
+    async fn get_token_usage_stats(&self) -> anyhow::Result<Option<TokenUsageStats>> {
+        if self.auth_token.is_none() {
+            anyhow::bail!("Auth token required");
+        }
+
+        let query = r#"
+            query GetTokenUsageStats {
+                tokenUsageStats {
+                    isLimited
+                    daily { usage limit status }
+                    weekly { usage limit status }
+                    monthly { usage limit status }
+                }
+            }
+        "#;
+
+        #[derive(Serialize)]
+        struct NoVars {}
+
+        let resp = self
+            .authed_post()
+            .json(&GqlRequest {
+                query: query.to_string(),
+                variables: NoVars {},
+                operation_name: "GetTokenUsageStats".to_string(),
+            })
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("GetTokenUsageStats failed: {} - {}", status, body);
+        }
+
+        let gql: GqlResponse<GetTokenUsageStatsData> = resp.json().await?;
+        check_errors(gql.errors)?;
+
+        Ok(gql
+            .data
+            .and_then(|d| d.token_usage_stats)
+            .map(|node| TokenUsageStats {
+                is_limited: node.is_limited,
+                daily: node.daily.into_period(),
+                weekly: node.weekly.into_period(),
+                monthly: node.monthly.into_period(),
+            }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetTokenUsageStatsData {
+    token_usage_stats: Option<TokenUsageStatsNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenUsageStatsNode {
+    is_limited: bool,
+    daily: TokenUsagePeriodNode,
+    weekly: TokenUsagePeriodNode,
+    monthly: TokenUsagePeriodNode,
+}
+
+#[derive(Deserialize)]
+struct TokenUsagePeriodNode {
+    usage: i64,
+    limit: Option<i64>,
+    status: String,
+}
+
+impl TokenUsagePeriodNode {
+    fn into_period(self) -> TokenUsagePeriod {
+        TokenUsagePeriod {
+            usage: self.usage,
+            limit: self.limit,
+            status: self
+                .status
+                .parse::<TokenUsageStatus>()
+                .unwrap_or(TokenUsageStatus::Unknown),
+        }
     }
 }

@@ -3293,6 +3293,7 @@ dependencies = [
  "ks-state",
  "kube",
  "lucide-dioxus",
+ "open",
  "pulldown-cmark",
  "regex",
  "reqwest",
