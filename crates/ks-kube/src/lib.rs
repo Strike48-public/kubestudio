@@ -13,6 +13,6 @@ pub use client::{
 pub use matrix::{
     AgentInfo, ChatClient, ChatMessage, ConsentAction, ConsentDecision, ConsentMode,
     ConversationInfo, ConversationState, CreateAgentInput, MatrixChatClient, MessagePart,
-    ToolCallInfo, UpdateAgentInput,
+    TokenUsagePeriod, TokenUsageStats, TokenUsageStatus, ToolCallInfo, UpdateAgentInput,
 };
 pub use toolbox::{ExecResult, PermissionMode, Toolbox, ToolboxStatus, cleanup_orphaned_toolbox};

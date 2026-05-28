@@ -7,8 +7,8 @@
 use dioxus::prelude::*;
 use ks_kube::{
     AgentInfo, ChatClient, ChatMessage, ConsentAction, ConsentDecision, ConsentMode,
-    ConversationInfo, CreateAgentInput, MatrixChatClient, MessagePart, ToolCallInfo,
-    UpdateAgentInput,
+    ConversationInfo, CreateAgentInput, MatrixChatClient, MessagePart, TokenUsageStatus,
+    ToolCallInfo, UpdateAgentInput,
 };
 
 use super::tool_confirm_modal::{ConsentResult, PendingToolCall, ToolConsentChoice};
@@ -124,6 +124,10 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
     let mut agent_thinking = use_signal(|| false);
     let mut agent_status_text = use_signal(String::new);
     let mut error_msg = use_signal(|| None::<String>);
+    // Quieter, agent-side notice (distinct from the loud `error_msg` red bar
+    // used for caller-side fetch failures). Populated by polling when the
+    // agent reports ERROR — see `build_error_notice` for the content shape.
+    let mut chat_notice = use_signal(|| None::<ChatNotice>);
 
     // Per-agent conversation tracking
     let mut agent_conversations: Signal<HashMap<String, String>> = use_signal(HashMap::new);
@@ -321,6 +325,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
             messages.set(Vec::new());
             is_sending.set(true);
             error_msg.set(None);
+            chat_notice.set(None);
 
             on_consumed.call(());
             let conv_id = match client
@@ -361,6 +366,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                             agent_thinking,
                             agent_status_text,
                             error_msg,
+                            chat_notice,
                             consent_pending,
                             consent_choice,
                             always_allow_tools,
@@ -405,6 +411,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
 
             let agent = agents.read().iter().find(|a| a.id == val).cloned();
             error_msg.set(None);
+            chat_notice.set(None);
             show_history.set(false);
             agent_thinking.set(false);
             agent_status_text.set(String::new());
@@ -435,6 +442,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                             agent_thinking,
                                             agent_status_text,
                                             error_msg,
+                                            chat_notice,
                                             consent_pending,
                                             consent_choice,
                                             always_allow_tools,
@@ -489,6 +497,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
             let client = make_client();
             is_sending.set(true);
             error_msg.set(None);
+            chat_notice.set(None);
 
             spawn(async move {
                 let existing_id: Option<String> = conversation_id.read().clone();
@@ -541,6 +550,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                 agent_thinking,
                                 agent_status_text,
                                 error_msg,
+                                chat_notice,
                                 consent_pending,
                                 consent_choice,
                                 always_allow_tools,
@@ -699,6 +709,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                 }
                                 show_history.set(false);
                                 error_msg.set(None);
+                                chat_notice.set(None);
 
                                 // Refresh conversation list in background
                                 {
@@ -792,6 +803,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                                 agent_thinking.set(false);
                                                 agent_status_text.set(String::new());
                                                 error_msg.set(None);
+                                                chat_notice.set(None);
                                                 user_scrolled_up.set(false);
                                                 // Load conversation messages
                                                 let client = make_client2();
@@ -818,7 +830,7 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                                                                 agent_status_text.set("Thinking...".to_string());
                                                                 poll_and_update(
                                                                     client, cid, conversation_id,
-                                                                    PollSignals { messages, agent_thinking, agent_status_text, error_msg, consent_pending, consent_choice, always_allow_tools },
+                                                                    PollSignals { messages, agent_thinking, agent_status_text, error_msg, chat_notice, consent_pending, consent_choice, always_allow_tools },
                                                                 )
                                                                 .await;
                                                             }
@@ -1006,6 +1018,52 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
                 }
             }
 
+            // Inline notice — sits above the input. Surfaced by polling when
+            // the agent backend returned ERROR (token limit, generic upstream).
+            // Quieter than `.chat-error` (which is reserved for caller-side
+            // fetch failures like "Failed to load agents").
+            if let Some(notice) = chat_notice.read().clone() {
+                {
+                    let kind_class = match notice.kind {
+                        ChatNoticeKind::TokenLimit => "chat-notice chat-notice--limit",
+                        ChatNoticeKind::UpstreamError => "chat-notice chat-notice--error",
+                    };
+                    let icon = match notice.kind {
+                        ChatNoticeKind::TokenLimit => "⏱",
+                        ChatNoticeKind::UpstreamError => "⚠",
+                    };
+                    let title = notice.title.clone();
+                    let detail = notice.detail.clone();
+                    let studio_url = notice.studio_url.clone();
+                    rsx! {
+                        div { class: "{kind_class}",
+                            span { class: "chat-notice__icon", "{icon}" }
+                            div { class: "chat-notice__body",
+                                div { class: "chat-notice__title", "{title}" }
+                                div { class: "chat-notice__detail", "{detail}" }
+                                if let Some(url) = studio_url {
+                                    button {
+                                        class: "chat-notice__link",
+                                        onclick: move |_| {
+                                            if let Err(e) = open::that(&url) {
+                                                tracing::warn!("Failed to open Studio URL: {}", e);
+                                            }
+                                        },
+                                        "Open Studio →"
+                                    }
+                                }
+                            }
+                            button {
+                                class: "chat-notice__close",
+                                aria_label: "Dismiss",
+                                onclick: move |_| chat_notice.set(None),
+                                "×"
+                            }
+                        }
+                    }
+                }
+            }
+
             if selected_agent.read().is_some() {
                 div { class: "chat-input-area",
                     textarea {
@@ -1036,6 +1094,30 @@ pub fn ChatPanel(props: ChatPanelProps) -> Element {
 // Polling helper with live status updates
 // ---------------------------------------------------------------------------
 
+/// Severity for an inline chat notice. Drives styling, not behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatNoticeKind {
+    /// The server hit a hard limit (token/rate). User action required.
+    TokenLimit,
+    /// Some other upstream failure — usually transient.
+    UpstreamError,
+}
+
+/// A small, less-shouty status message rendered inline above the chat input.
+///
+/// Polling produces these when it observes `agent_status == "ERROR"`. The actual
+/// error reason ships on the `conversationEvents` GraphQL subscription
+/// (`AgentStatusEvent.error`), which polling never sees — so we cross-reference
+/// `tokenUsageStats` to tell "limit exceeded" from "generic upstream blip".
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatNotice {
+    pub kind: ChatNoticeKind,
+    pub title: String,
+    pub detail: String,
+    /// Optional URL to the Studio session (e.g. for checking token usage).
+    pub studio_url: Option<String>,
+}
+
 /// Bundled signals used by the polling loop to update UI state.
 #[derive(Clone, Copy)]
 struct PollSignals {
@@ -1043,6 +1125,7 @@ struct PollSignals {
     agent_thinking: Signal<bool>,
     agent_status_text: Signal<String>,
     error_msg: Signal<Option<String>>,
+    chat_notice: Signal<Option<ChatNotice>>,
     consent_pending: Signal<Vec<PendingToolCall>>,
     consent_choice: Signal<Option<ConsentResult>>,
     always_allow_tools: Signal<std::collections::HashSet<String>>,
@@ -1093,11 +1176,18 @@ async fn poll_and_update(
     // After a few such polls the backend should have transitioned; if it hasn't,
     // re-send the resolved decisions to nudge it.
     let mut stale_consent_polls = 0u32;
+    // Sticky: once we observe ERROR, the conversation is failed even if the
+    // backend later transitions back to IDLE without producing an agent message.
+    // The reason ships only on the `conversationEvents` subscription, which
+    // polling never sees — so we cross-reference `tokenUsageStats` below to
+    // distinguish a tenant token-limit hit from a generic upstream blip.
+    let mut saw_error = false;
 
     for _attempt in 0..max_polls {
         match client.get_conversation(&conv_id).await {
             Ok(state) => {
                 let done = matches!(state.agent_status.as_str(), "IDLE" | "STREAM_END" | "ERROR");
+                saw_error |= state.agent_status.as_str() == "ERROR";
                 let has_agent_msg = state
                     .messages
                     .iter()
@@ -1280,13 +1370,28 @@ async fn poll_and_update(
                         stale_consent_polls = 0;
                     }
 
+                    // Sticky-error path: once we've seen ERROR (or are seeing
+                    // it now), surface a notice and exit. This handles the
+                    // ERROR-then-IDLE flip the backend sometimes emits where
+                    // there's no agent message at all and the previous
+                    // bail-out would silently leave the UI stuck.
+                    if saw_error {
+                        let notice = build_error_notice(client.as_ref()).await;
+                        sig.chat_notice.set(Some(notice));
+                        sig.messages.set(state.messages);
+                        sig.agent_thinking.set(false);
+                        sig.agent_status_text.set(String::new());
+                        sig.consent_pending.set(Vec::new());
+                        return;
+                    }
+
                     if done {
                         // Agent finished. Prefer waiting for a text message,
-                        // but always exit if status is ERROR or we have any
-                        // non-user messages (even tool-call-only).
+                        // but always exit if we have any non-user messages
+                        // (even tool-call-only).
                         let has_any_agent_msg =
                             state.messages.iter().any(|m| m.sender_type != "USER");
-                        if has_agent_msg || state.agent_status == "ERROR" || has_any_agent_msg {
+                        if has_agent_msg || has_any_agent_msg {
                             sig.messages.set(state.messages);
                             sig.agent_thinking.set(false);
                             sig.agent_status_text.set(String::new());
@@ -1294,7 +1399,9 @@ async fn poll_and_update(
                             return;
                         }
                     }
-                } else if done && has_agent_msg {
+                } else if saw_error || (done && has_agent_msg) {
+                    // Conversation finished (success or error) while the user
+                    // was viewing another one — let it go without touching UI.
                     return;
                 }
             }
@@ -1323,6 +1430,140 @@ async fn poll_and_update(
         sig.agent_status_text.set(String::new());
         sig.consent_pending.set(Vec::new());
     }
+}
+
+// ---------------------------------------------------------------------------
+// Error-notice builders
+// ---------------------------------------------------------------------------
+
+/// Build a `ChatNotice` describing why the conversation transitioned to ERROR.
+/// Queries `tokenUsageStats` to distinguish a real limit-hit from a generic
+/// upstream blip; falls back to a generic notice if the query fails or the
+/// server doesn't expose usage stats.
+async fn build_error_notice(client: &MatrixChatClient) -> ChatNotice {
+    let studio_url = studio_url_from_api(client.api_url());
+
+    match client.get_token_usage_stats().await {
+        Ok(Some(stats)) => match stats.first_exceeded() {
+            Some((period, p)) => {
+                let detail = match p.limit {
+                    Some(limit) => format!(
+                        "{} token limit reached ({} / {}). Wait for the window to reset, or \
+                         contact your tenant admin to raise the limit.",
+                        capitalize_period(period),
+                        format_with_commas(p.usage),
+                        format_with_commas(limit),
+                    ),
+                    None => format!(
+                        "{} token limit reached ({} tokens used). Wait for the window to \
+                         reset, or contact your tenant admin to raise the limit.",
+                        capitalize_period(period),
+                        format_with_commas(p.usage),
+                    ),
+                };
+                ChatNotice {
+                    kind: ChatNoticeKind::TokenLimit,
+                    title: "Token limit reached".to_string(),
+                    detail,
+                    studio_url,
+                }
+            }
+            None => generic_upstream_notice(studio_url, stats.daily.status),
+        },
+        Ok(None) => generic_upstream_notice(studio_url, TokenUsageStatus::Unknown),
+        Err(e) => {
+            tracing::warn!("[ChatPoll] tokenUsageStats query failed after ERROR: {}", e);
+            generic_upstream_notice(studio_url, TokenUsageStatus::Unknown)
+        }
+    }
+}
+
+fn generic_upstream_notice(
+    studio_url: Option<String>,
+    daily_status: TokenUsageStatus,
+) -> ChatNotice {
+    // If the daily period is in WARNING, mention it — the operator may be
+    // about to hit the limit and benefits from the heads-up.
+    let detail = if matches!(daily_status, TokenUsageStatus::Warning) {
+        "The agent backend returned an error and no reply was produced. You're close to your \
+         daily token limit — check Studio for current usage."
+            .to_string()
+    } else {
+        "The agent backend returned an error and no reply was produced. This is usually \
+         transient — try again, or start a new chat."
+            .to_string()
+    };
+    ChatNotice {
+        kind: ChatNoticeKind::UpstreamError,
+        title: "Agent error".to_string(),
+        detail,
+        studio_url,
+    }
+}
+
+fn capitalize_period(p: &str) -> &'static str {
+    match p {
+        "daily" => "Daily",
+        "weekly" => "Weekly",
+        "monthly" => "Monthly",
+        _ => "Period",
+    }
+}
+
+/// Format `n` with thousands separators, e.g. `1234567` → `"1,234,567"`.
+fn format_with_commas(n: i64) -> String {
+    let s = n.abs().to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    if n < 0 { format!("-{}", out) } else { out }
+}
+
+/// Build a Studio web-app URL from the Matrix API base.
+///
+/// `api_url` is the Matrix GraphQL host (e.g. `https://studio.example:443`);
+/// the Studio SPA is served at `/studio/` on the same host. We strip the
+/// default port (`:443` for https, `:80` for http) for cleanliness and append
+/// `#/` so the hash-routed SPA bootstraps at the root route.
+fn studio_url_from_api(api_url: &str) -> Option<String> {
+    let trimmed = api_url.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = strip_default_port(trimmed);
+    Some(format!("{}/studio/#/", normalized))
+}
+
+/// Remove `:443` after `https://` or `:80` after `http://`; leave other ports
+/// (and the path) untouched.
+fn strip_default_port(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("https://")
+        && let Some(stripped_host) = strip_port_suffix(rest, ":443")
+    {
+        return format!("https://{}", stripped_host);
+    }
+    if let Some(rest) = url.strip_prefix("http://")
+        && let Some(stripped_host) = strip_port_suffix(rest, ":80")
+    {
+        return format!("http://{}", stripped_host);
+    }
+    url.to_string()
+}
+
+/// Strip `port_suffix` from the host portion of `rest` (everything up to the
+/// first `/`). Returns `None` if the port isn't present at that position.
+fn strip_port_suffix(rest: &str, port_suffix: &str) -> Option<String> {
+    let (host_part, path_part) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let stripped_host = host_part.strip_suffix(port_suffix)?;
+    Some(format!("{}{}", stripped_host, path_part))
 }
 
 // ---------------------------------------------------------------------------
@@ -1758,4 +1999,56 @@ fn parse_iso_timestamp(iso: &str) -> Option<u64> {
 
 fn is_leap_year(y: u64) -> bool {
     (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+
+#[cfg(test)]
+mod chat_notice_tests {
+    use super::*;
+
+    #[test]
+    fn format_with_commas_handles_small_and_large() {
+        assert_eq!(format_with_commas(0), "0");
+        assert_eq!(format_with_commas(42), "42");
+        assert_eq!(format_with_commas(1_234), "1,234");
+        assert_eq!(format_with_commas(1_080_000), "1,080,000");
+        assert_eq!(format_with_commas(-1_234), "-1,234");
+    }
+
+    #[test]
+    fn studio_url_strips_default_ports_and_appends_hash_route() {
+        assert_eq!(
+            studio_url_from_api("https://example.test:443/"),
+            Some("https://example.test/studio/#/".to_string())
+        );
+        assert_eq!(
+            studio_url_from_api("https://example.test:443"),
+            Some("https://example.test/studio/#/".to_string())
+        );
+        assert_eq!(
+            studio_url_from_api("http://example.test:80"),
+            Some("http://example.test/studio/#/".to_string())
+        );
+        assert_eq!(studio_url_from_api(""), None);
+    }
+
+    #[test]
+    fn studio_url_preserves_non_default_ports() {
+        assert_eq!(
+            studio_url_from_api("https://example.test:8443"),
+            Some("https://example.test:8443/studio/#/".to_string())
+        );
+        assert_eq!(
+            studio_url_from_api("http://localhost:4000"),
+            Some("http://localhost:4000/studio/#/".to_string())
+        );
+    }
+
+    #[test]
+    fn strip_port_suffix_only_matches_at_host_boundary() {
+        // ":443" appearing in a path must not be stripped
+        assert_eq!(
+            strip_default_port("https://example.test/foo:443/bar"),
+            "https://example.test/foo:443/bar"
+        );
+    }
 }
