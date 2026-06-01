@@ -2,33 +2,37 @@
 #
 # Each ignored advisory below has a documented decision per issue #8:
 #   - root cause (which direct dep pulls it in)
-#   - why it's currently accepted
-#   - the upstream change that would let us remove the ignore
+#   - why it is currently accepted
+#   - the upstream change that would let us drop the ignore
 #
-# Triage cadence: re-run `cargo deny check advisories` whenever bumping
-# dioxus, kube, or k8s-openapi and prune ignores that no longer match.
+# Triage cadence: re-run `cargo deny check` and `cargo audit` whenever
+# bumping dioxus, kube, k8s-openapi, wry, tao, or the Strike48 SDK and
+# prune ignores that no longer match.
 
 [advisories]
 version = 2
 ignore = [
     # ---------------------------------------------------------------------
-    # GTK3 binding chain — transitive via dioxus-desktop 0.6 → wry 0.45 →
+    # GTK3 binding chain — transitive via dioxus-desktop 0.7 → wry 0.53 →
     # gtk 0.18 + javascriptcore-rs + webkit2gtk. The entire gtk-rs GTK3
     # binding family was marked unmaintained on 2024-11-26 in favour of
-    # GTK4 bindings, with no security impact called out by the
-    # maintainers. We cannot drop these without a major dioxus-desktop
-    # rewrite (or switching to dioxus-native/Blitz). Track removal when:
-    #   - dioxus-desktop migrates to a GTK4-backed wry, or
+    # GTK4 bindings; no security impact called out by the maintainers.
+    # gdkx11 (RUSTSEC-2024-0417) is not reached on the wry 0.53 feature
+    # set, only the low-level gdkx11-sys binding. Linux is the only
+    # target affected; macOS/Windows builds do not pull GTK at all.
+    #
+    # Removal trigger (any one of):
+    #   - dioxus-desktop adopts a GTK4-backed wry, or
     #   - dioxus-native (Blitz) reaches feature parity for our UI, or
-    #   - we adopt an alternative desktop renderer.
-    # See docs/dependency-tracking.md for upstream status.
+    #   - we switch desktop renderer entirely.
+    # Upstream: https://github.com/tauri-apps/wry/issues/1474
+    # See docs/dependency-tracking.md for full status.
     "RUSTSEC-2024-0411", # gdkwayland-sys (unmaintained)
     "RUSTSEC-2024-0412", # gdk (unmaintained)
     "RUSTSEC-2024-0413", # atk (unmaintained)
     "RUSTSEC-2024-0414", # gdkx11-sys (unmaintained)
     "RUSTSEC-2024-0415", # gtk (unmaintained)
     "RUSTSEC-2024-0416", # atk-sys (unmaintained)
-    "RUSTSEC-2024-0417", # gdkx11 (unmaintained)
     "RUSTSEC-2024-0418", # gdk-sys (unmaintained)
     "RUSTSEC-2024-0419", # gtk3-macros (unmaintained)
     "RUSTSEC-2024-0420", # gtk-sys (unmaintained)
@@ -36,40 +40,45 @@ ignore = [
     # ---------------------------------------------------------------------
     # proc-macro-error — transitive via glib-macros 0.18 and gtk3-macros,
     # i.e. the same GTK3 chain above. Risk is low: build-time only proc
-    # macro, no runtime exposure. Will drop out automatically when the
-    # GTK3 chain is replaced.
+    # macro, no runtime exposure. Drops out automatically when the GTK3
+    # chain is replaced.
     "RUSTSEC-2024-0370", # proc-macro-error (unmaintained)
 
     # ---------------------------------------------------------------------
-    # instant 0.1 — transitive via backoff 0.4 (kube-runtime 0.98) and
-    # tao 0.30 (dioxus-desktop). Upstream recommends `web-time`. No fix
-    # available without dropping backoff or upgrading the dioxus-desktop
-    # → tao chain. Drops out together with `backoff` (kube upgrade) and
-    # the GTK3/tao chain.
-    "RUSTSEC-2024-0384", # instant (unmaintained)
+    # glib 0.18 — `VariantStrIter` Iterator / DoubleEndedIterator impls
+    # are unsound. We never construct a `glib::Variant` or call
+    # `VariantStrIter` ourselves; glib 0.18 is reached only as a
+    # transitive of the GTK3 chain (gtk 0.18 → glib 0.18). glib 0.19+
+    # has the fix but the entire gtk-rs 0.19+ line targets GTK4 and is
+    # only available once wry migrates. Drops out with the GTK3 chain.
+    "RUSTSEC-2024-0429", # glib (unsound VariantStrIter — gtk-rs 0.18)
 
     # ---------------------------------------------------------------------
-    # backoff — transitive via kube-runtime 0.98. Replaced by `backon`
-    # in kube-runtime 2.0+. Upgrading kube to 2.x clears this advisory
-    # but is a separate, focused change (k8s-openapi 0.24 → 0.26, MSRV
-    # 1.85). Tracked as follow-up work.
-    "RUSTSEC-2025-0012", # backoff (unmaintained)
+    # fxhash + rand 0.7 + selectors 0.24 — wry 0.53 pulls a maintained
+    # fork (`kuchikiki 0.8.8-speedreader`) that still uses the legacy
+    # `selectors 0.22/0.24` → `phf 0.8` → `fxhash` + `rand 0.7` chain.
+    # Drops out when wry retires kuchikiki (in-flight upstream alongside
+    # the GTK4 migration, https://github.com/tauri-apps/wry/issues/1474).
+    "RUSTSEC-2025-0057", # fxhash (unmaintained — wry/kuchikiki chain)
+    "RUSTSEC-2026-0097", # rand (unsound with custom logger — wry/kuchikiki)
 
     # ---------------------------------------------------------------------
-    # fxhash — transitive via wry 0.45 → kuchikiki 0.8 → selectors 0.22.
-    # Upstream recommends rustc-hash. We cannot replace it without
-    # changes inside wry/kuchikiki. Drops out with the dioxus-desktop /
-    # wry upgrade tracked alongside the GTK3 chain.
-    "RUSTSEC-2025-0057", # fxhash (unmaintained)
+    # paste 1.0 — transitive via dioxus-desktop 0.7 → image 0.25
+    # (default features) → ravif → rav1e. dioxus-desktop hardcodes
+    # `image = "0.25"` with default features (incl. avif). We can't
+    # disable it without forking dioxus-desktop. Drops out when
+    # dioxus-desktop disables image default features or upstream
+    # ravif moves off `paste`.
+    "RUSTSEC-2024-0436", # paste (unmaintained — image AVIF chain)
 
     # ---------------------------------------------------------------------
-    # rustls-pemfile 2.2 — transitive via kube-client 0.98. Upstream is
-    # archived (2025-08); maintainers recommend depending directly on
-    # rustls-pki-types ≥ 1.9. Drops out when we upgrade kube to a
-    # release that has migrated (kube-client 1.1+ moved off the
-    # rustls-pemfile wrapper). Tracked as a follow-up alongside the
-    # backoff advisory.
-    "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained)
+    # rustls-pemfile 2.2 — transitive via tonic 0.12 (pulled by
+    # strike48-connector / strike48-proto 0.4.1). kube-client 2.0 has
+    # already moved off rustls-pemfile to the `pem` crate. Drops out
+    # when the Strike48 SDK upgrades to tonic 0.13+. Tracked at
+    # https://github.com/hyperium/tonic/issues — the 0.13 release line
+    # depends on rustls-pki-types directly.
+    "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained — tonic 0.12)
 ]
 
 [licenses]
@@ -89,6 +98,10 @@ allow = [
     "CC0-1.0",
     "Apache-2.0 WITH LLVM-exception",
     "CDLA-Permissive-2.0",
+    # libfuzzer-sys (transitive via image 0.25 → ravif → rav1e):
+    # University of Illinois / NCSA Open Source License. OSI-approved,
+    # FSF Free/Libre, permissive — comparable to MIT/BSD.
+    "NCSA",
 ]
 
 # strike48 crates don't publish license metadata
