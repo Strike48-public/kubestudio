@@ -17,8 +17,8 @@ async-trait = "0.1"
 bytes = "1.9"
 
 # Kubernetes
-kube = { version = "0.98", features = ["runtime", "client", "derive", "ws"] }
-k8s-openapi = { version = "0.24", features = ["latest"] }
+kube = { version = "2.0", features = ["runtime", "client", "derive", "ws"] }
+k8s-openapi = { version = "0.26", features = ["latest"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -55,8 +55,8 @@ tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 dashmap = "6"
 
 # Strike48 Connector SDK
-strike48-connector = "0.3.4"
-strike48-proto = "0.3.4"
+strike48-connector = "0.4.1"
+strike48-proto = "0.4.1"
 
 # Web server (for connector mode)
 axum = "0.7"
