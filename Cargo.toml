@@ -30,7 +30,7 @@ thiserror = "2.0"
 anyhow = "1.0"
 
 # UI (features added at crate level for desktop/fullstack modes)
-dioxus = "0.6"
+dioxus = "0.7"
 
 # Logging
 tracing = "0.1"
@@ -59,7 +59,7 @@ strike48-connector = "0.4.1"
 strike48-proto = "0.4.1"
 
 # Web server (for connector mode)
-axum = "0.7"
+axum = "0.8"
 
 # HTTP primitives (for Unix socket serving + client)
 hyper = { version = "1", features = ["http1", "server", "client"] }
@@ -68,4 +68,4 @@ http-body-util = "0.1"
 tower-service = "0.3"
 
 # Dioxus liveview (direct dependency to avoid dioxus/liveview feature bug)
-dioxus-liveview = { version = "0.6", features = ["axum"] }
+dioxus-liveview = { version = "0.7", features = ["axum"] }
