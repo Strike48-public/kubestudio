@@ -80,7 +80,7 @@ hyper-util = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 tower-service = { workspace = true, optional = true }
 pulldown-cmark = "0.13.0"
-lucide-dioxus = { version = "2.40.0", features = ["all-icons"] }
+lucide-dioxus = { version = "3.11", features = ["all-icons"] }
 # `open` is used by ChatPanel's token-limit notice to launch the system browser
 # at the Studio URL. Cross-platform shell launcher with no native deps.
 open = "5"

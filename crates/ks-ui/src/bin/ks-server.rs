@@ -48,11 +48,11 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    let router = Router::new()
-        .with_app("/", ks_ui::App)
+    let router: Router = Router::new()
         .route("/", get(|| async { Redirect::temporary("/liveview") }))
         .route("/health", get(health))
-        .route("/readiness", get(readiness));
+        .route("/readiness", get(readiness))
+        .with_app("/", ks_ui::App);
 
     tracing::info!("KubeStudio server listening on http://{addr}");
 
