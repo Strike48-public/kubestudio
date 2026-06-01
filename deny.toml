@@ -1,25 +1,75 @@
+# cargo-deny configuration
+#
+# Each ignored advisory below has a documented decision per issue #8:
+#   - root cause (which direct dep pulls it in)
+#   - why it's currently accepted
+#   - the upstream change that would let us remove the ignore
+#
+# Triage cadence: re-run `cargo deny check advisories` whenever bumping
+# dioxus, kube, or k8s-openapi and prune ignores that no longer match.
+
 [advisories]
 version = 2
 ignore = [
-    "RUSTSEC-2024-0370", # proc-macro-error is unmaintained, transitive dep
-    # GTK3 bindings unmaintained (transitive from dioxus-desktop/wry)
-    "RUSTSEC-2024-0411", # gdkwayland-sys
-    "RUSTSEC-2024-0412", # gdk
-    "RUSTSEC-2024-0413", # atk
-    "RUSTSEC-2024-0414", # gdkx11-sys
-    "RUSTSEC-2024-0415", # gtk
-    "RUSTSEC-2024-0416", # atk-sys
-    "RUSTSEC-2024-0417", # gdkx11
-    "RUSTSEC-2024-0418", # gdk-sys
-    "RUSTSEC-2024-0419", # gtk3-macros
-    "RUSTSEC-2024-0420", # gtk-sys
-    # Transitive unsound advisories (no fix available upstream)
-    "RUSTSEC-2026-0097", # rand unsound with custom logger, transitive dep (multiple versions)
-    # Other unmaintained transitive deps
-    "RUSTSEC-2025-0012", # backoff
-    "RUSTSEC-2025-0057", # fxhash
-    "RUSTSEC-2024-0384", # instant
-    "RUSTSEC-2025-0134", # rustls-pemfile
+    # ---------------------------------------------------------------------
+    # GTK3 binding chain — transitive via dioxus-desktop 0.6 → wry 0.45 →
+    # gtk 0.18 + javascriptcore-rs + webkit2gtk. The entire gtk-rs GTK3
+    # binding family was marked unmaintained on 2024-11-26 in favour of
+    # GTK4 bindings, with no security impact called out by the
+    # maintainers. We cannot drop these without a major dioxus-desktop
+    # rewrite (or switching to dioxus-native/Blitz). Track removal when:
+    #   - dioxus-desktop migrates to a GTK4-backed wry, or
+    #   - dioxus-native (Blitz) reaches feature parity for our UI, or
+    #   - we adopt an alternative desktop renderer.
+    # See docs/dependency-tracking.md for upstream status.
+    "RUSTSEC-2024-0411", # gdkwayland-sys (unmaintained)
+    "RUSTSEC-2024-0412", # gdk (unmaintained)
+    "RUSTSEC-2024-0413", # atk (unmaintained)
+    "RUSTSEC-2024-0414", # gdkx11-sys (unmaintained)
+    "RUSTSEC-2024-0415", # gtk (unmaintained)
+    "RUSTSEC-2024-0416", # atk-sys (unmaintained)
+    "RUSTSEC-2024-0417", # gdkx11 (unmaintained)
+    "RUSTSEC-2024-0418", # gdk-sys (unmaintained)
+    "RUSTSEC-2024-0419", # gtk3-macros (unmaintained)
+    "RUSTSEC-2024-0420", # gtk-sys (unmaintained)
+
+    # ---------------------------------------------------------------------
+    # proc-macro-error — transitive via glib-macros 0.18 and gtk3-macros,
+    # i.e. the same GTK3 chain above. Risk is low: build-time only proc
+    # macro, no runtime exposure. Will drop out automatically when the
+    # GTK3 chain is replaced.
+    "RUSTSEC-2024-0370", # proc-macro-error (unmaintained)
+
+    # ---------------------------------------------------------------------
+    # instant 0.1 — transitive via backoff 0.4 (kube-runtime 0.98) and
+    # tao 0.30 (dioxus-desktop). Upstream recommends `web-time`. No fix
+    # available without dropping backoff or upgrading the dioxus-desktop
+    # → tao chain. Drops out together with `backoff` (kube upgrade) and
+    # the GTK3/tao chain.
+    "RUSTSEC-2024-0384", # instant (unmaintained)
+
+    # ---------------------------------------------------------------------
+    # backoff — transitive via kube-runtime 0.98. Replaced by `backon`
+    # in kube-runtime 2.0+. Upgrading kube to 2.x clears this advisory
+    # but is a separate, focused change (k8s-openapi 0.24 → 0.26, MSRV
+    # 1.85). Tracked as follow-up work.
+    "RUSTSEC-2025-0012", # backoff (unmaintained)
+
+    # ---------------------------------------------------------------------
+    # fxhash — transitive via wry 0.45 → kuchikiki 0.8 → selectors 0.22.
+    # Upstream recommends rustc-hash. We cannot replace it without
+    # changes inside wry/kuchikiki. Drops out with the dioxus-desktop /
+    # wry upgrade tracked alongside the GTK3 chain.
+    "RUSTSEC-2025-0057", # fxhash (unmaintained)
+
+    # ---------------------------------------------------------------------
+    # rustls-pemfile 2.2 — transitive via kube-client 0.98. Upstream is
+    # archived (2025-08); maintainers recommend depending directly on
+    # rustls-pki-types ≥ 1.9. Drops out when we upgrade kube to a
+    # release that has migrated (kube-client 1.1+ moved off the
+    # rustls-pemfile wrapper). Tracked as a follow-up alongside the
+    # backoff advisory.
+    "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained)
 ]
 
 [licenses]
