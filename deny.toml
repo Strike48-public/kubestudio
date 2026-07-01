@@ -45,22 +45,11 @@ ignore = [
     "RUSTSEC-2024-0370", # proc-macro-error (unmaintained)
 
     # ---------------------------------------------------------------------
-    # glib 0.18 — `VariantStrIter` Iterator / DoubleEndedIterator impls
-    # are unsound. We never construct a `glib::Variant` or call
-    # `VariantStrIter` ourselves; glib 0.18 is reached only as a
-    # transitive of the GTK3 chain (gtk 0.18 → glib 0.18). glib 0.19+
-    # has the fix but the entire gtk-rs 0.19+ line targets GTK4 and is
-    # only available once wry migrates. Drops out with the GTK3 chain.
-    "RUSTSEC-2024-0429", # glib (unsound VariantStrIter — gtk-rs 0.18)
-
-    # ---------------------------------------------------------------------
-    # fxhash + rand 0.7 + selectors 0.24 — wry 0.53 pulls a maintained
-    # fork (`kuchikiki 0.8.8-speedreader`) that still uses the legacy
-    # `selectors 0.22/0.24` → `phf 0.8` → `fxhash` + `rand 0.7` chain.
-    # Drops out when wry retires kuchikiki (in-flight upstream alongside
+    # fxhash — wry 0.53 pulls a maintained fork (`kuchikiki 0.8.8-speedreader`)
+    # that still uses the legacy `selectors 0.22/0.24` → `phf 0.8` → `fxhash`
+    # chain. Drops out when wry retires kuchikiki (in-flight upstream alongside
     # the GTK4 migration, https://github.com/tauri-apps/wry/issues/1474).
     "RUSTSEC-2025-0057", # fxhash (unmaintained — wry/kuchikiki chain)
-    "RUSTSEC-2026-0097", # rand (unsound with custom logger — wry/kuchikiki)
 
     # ---------------------------------------------------------------------
     # paste 1.0 — transitive via dioxus-desktop 0.7 → image 0.25
@@ -70,15 +59,6 @@ ignore = [
     # dioxus-desktop disables image default features or upstream
     # ravif moves off `paste`.
     "RUSTSEC-2024-0436", # paste (unmaintained — image AVIF chain)
-
-    # ---------------------------------------------------------------------
-    # rustls-pemfile 2.2 — transitive via tonic 0.12 (pulled by
-    # strike48-connector / strike48-proto 0.4.1). kube-client 2.0 has
-    # already moved off rustls-pemfile to the `pem` crate. Drops out
-    # when the Strike48 SDK upgrades to tonic 0.13+. Tracked at
-    # https://github.com/hyperium/tonic/issues — the 0.13 release line
-    # depends on rustls-pki-types directly.
-    "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained — tonic 0.12)
 ]
 
 [licenses]
