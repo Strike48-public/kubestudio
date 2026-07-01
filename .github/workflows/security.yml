@@ -36,7 +36,9 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Run cargo audit
-        run: cargo audit --ignore RUSTSEC-2024-0370
+        # Ignore list is in .cargo/audit.toml — see /deny.toml for per-
+        # advisory justification and /docs/dependency-tracking.md.
+        run: cargo audit
 
   cargo-deny:
     name: License & Supply Chain

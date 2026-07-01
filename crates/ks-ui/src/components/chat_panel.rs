@@ -94,7 +94,7 @@ pub struct ChatPanelProps {
     /// Matrix API URL (e.g. "http://localhost:4000").
     pub api_url: String,
     /// Auth token for Matrix GraphQL calls (signal so effects re-run when it arrives).
-    pub auth_token: ReadOnlySignal<String>,
+    pub auth_token: ReadSignal<String>,
     /// Tenant/realm name (e.g. "non-prod") used when auto-creating the agent
     /// so connector tool patterns resolve correctly.
     pub tenant_id: String,
