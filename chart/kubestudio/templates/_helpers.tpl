@@ -69,6 +69,14 @@ ks-server
 {{- end }}
 
 {{/*
+Absolute path of the binary inside the image. Using the absolute path avoids
+depending on the container's $PATH (see issue #44) and lets tini exec it directly.
+*/}}
+{{- define "kubestudio.binaryPath" -}}
+{{- printf "/usr/local/bin/%s" (include "kubestudio.binary" .) -}}
+{{- end }}
+
+{{/*
 Build KUBECONFIG env value from mounted secret keys.
 */}}
 {{- define "kubestudio.kubeconfigPaths" -}}

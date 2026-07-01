@@ -35,7 +35,16 @@ spec:
         - name: kubestudio
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [{{ include "kubestudio.binary" . | quote }}]
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            {{- if .Values.args }}
+            {{- toYaml .Values.args | nindent 12 }}
+            {{- else }}
+            - {{ include "kubestudio.binaryPath" . | quote }}
+            {{- end }}
           env:
             - name: PORT
               value: {{ .Values.kubestudio.port | quote }}
@@ -84,6 +93,9 @@ spec:
             - name: MATRIX_TLS_INSECURE
               value: "true"
             {{- end }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
             - name: http
