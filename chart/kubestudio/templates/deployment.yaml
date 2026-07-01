@@ -90,19 +90,24 @@ spec:
               containerPort: {{ .Values.kubestudio.port }}
               protocol: TCP
           {{- if eq .Values.mode "ai-enabled" }}
+          {{- /*
+            The connector writes its liveview socket at /tmp/ks-connector-<pid>.sock
+            (crates/ks-ui/src/ipc.rs). With tini as PID 1 the connector's PID varies,
+            so we glob for any matching socket rather than assuming a fixed PID.
+          */}}
           livenessProbe:
             exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+              command: ["sh", "-c", "ls /tmp/ks-connector-*.sock >/dev/null 2>&1"]
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+              command: ["sh", "-c", "ls /tmp/ks-connector-*.sock >/dev/null 2>&1"]
             initialDelaySeconds: 5
             periodSeconds: 10
           startupProbe:
             exec:
-              command: ["test", "-S", "/tmp/ks-connector-1.sock"]
+              command: ["sh", "-c", "ls /tmp/ks-connector-*.sock >/dev/null 2>&1"]
             failureThreshold: 30
             periodSeconds: 2
           {{- else }}
