@@ -41,7 +41,7 @@ spec:
               value: {{ .Values.kubestudio.port | quote }}
             - name: RUST_LOG
               value: {{ .Values.kubestudio.logLevel | quote }}
-            - name: KUBESTUDIO_PERMISSION_MODE
+            - name: KUBESTUDIO_MODE
               value: {{ if .Values.kubestudio.yolo }}"write"{{ else }}{{ .Values.kubestudio.permissionMode | quote }}{{ end }}
             {{- if .Values.kubestudio.yolo }}
             - name: KUBESTUDIO_YOLO
