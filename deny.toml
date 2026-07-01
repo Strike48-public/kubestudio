@@ -9,6 +9,22 @@
 # bumping dioxus, kube, k8s-openapi, wry, tao, or the Strike48 SDK and
 # prune ignores that no longer match.
 
+# ---------------------------------------------------------------------
+# Explicit target list so `cargo deny check` on a developer host sees the
+# same dependency graph CI does (release + Docker matrices). Without this,
+# cargo-deny defaults to the host target only, and target-conditional
+# transitives (e.g. rustls-pemfile via tonic/prost-build on Linux) get
+# silently skipped locally while CI still fails.
+# Keep in sync with .github/workflows/release.yml and docker-multiarch.yml.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
 [advisories]
 version = 2
 ignore = [
@@ -45,13 +61,6 @@ ignore = [
     "RUSTSEC-2024-0370", # proc-macro-error (unmaintained)
 
     # ---------------------------------------------------------------------
-    # fxhash — wry 0.53 pulls a maintained fork (`kuchikiki 0.8.8-speedreader`)
-    # that still uses the legacy `selectors 0.22/0.24` → `phf 0.8` → `fxhash`
-    # chain. Drops out when wry retires kuchikiki (in-flight upstream alongside
-    # the GTK4 migration, https://github.com/tauri-apps/wry/issues/1474).
-    "RUSTSEC-2025-0057", # fxhash (unmaintained — wry/kuchikiki chain)
-
-    # ---------------------------------------------------------------------
     # paste 1.0 — transitive via dioxus-desktop 0.7 → image 0.25
     # (default features) → ravif → rav1e. dioxus-desktop hardcodes
     # `image = "0.25"` with default features (incl. avif). We can't
@@ -59,6 +68,17 @@ ignore = [
     # dioxus-desktop disables image default features or upstream
     # ravif moves off `paste`.
     "RUSTSEC-2024-0436", # paste (unmaintained — image AVIF chain)
+
+    # ---------------------------------------------------------------------
+    # rustls-pemfile 2.2 — transitive via tonic 0.12 (pulled by
+    # strike48-connector / strike48-proto 0.4.1). kube-client 2.0 has
+    # already moved off rustls-pemfile to the `pem` crate. Drops out
+    # when the Strike48 SDK upgrades to tonic 0.13+ (tonic 0.13 line
+    # depends on rustls-pki-types directly).
+    # NOTE: only reached on Linux targets via the tonic-build chain —
+    # the [graph] targets list above ensures local `cargo deny` checks
+    # this the same way CI does.
+    "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained — tonic 0.12)
 ]
 
 [licenses]
