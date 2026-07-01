@@ -12,6 +12,21 @@ fullnameOverride: ""
 
 replicaCount: 1
 
+# -- Container command override. When set, replaces the image ENTRYPOINT
+# (which is `tini --`). Leave empty to keep tini as PID 1 for proper signal
+# forwarding and zombie reaping.
+command: []
+
+# -- Container args override. When set, replaces the default binary invocation.
+# Defaults to the mode-selected binary at its absolute install path
+# (/usr/local/bin/ks-server or /usr/local/bin/ks-connector), which avoids
+# any dependency on the container's $PATH.
+args: []
+
+# -- Extra environment variables appended to the container's env list.
+# Standard Kubernetes env entries: `- name: FOO`, `value: "bar"` or `valueFrom: ...`.
+extraEnv: []
+
 kubestudio:
   # -- Permission mode: "read" (view-only) or "write" (allow edits)
   # Ignored when yolo=true (yolo grants cluster-admin).
