@@ -1,18 +1,25 @@
 # ============================================================
-# KubeStudio — multi-arch minimal container image
+# KubeStudio — multi-arch distroless container image
 # ============================================================
-# Uses gcr.io/distroless/cc-debian12 as runtime — ~25MB base with
-# libc + libssl + CA certs, no shell, no package manager.
+# Runtime base: gcr.io/distroless/cc-debian12 — glibc, libssl, ca-certs, no
+# shell, no package manager. Adds only what the app actually needs:
+#   * tini              — PID 1 init (signal fwd + zombie reap)
+#   * busybox-static    — sh/ls/test for exec probes in ai-enabled mode
+#                         (the chart's liveness/readiness probes for the
+#                         connector rely on `sh -c 'ls /tmp/…'`)
+#   * ks-server         — standalone web UI
+#   * ks-connector      — Matrix AI connector
 #
-# Usage:
-#   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -t ghcr.io/strike48-public/kubestudio:latest \
-#     -f Dockerfile.scratch --push .
+# Binary selection is done via the Helm chart's `args:` field (the image sets
+# no hardcoded CMD-only entrypoint), so a single image serves both
+# `mode=standalone` (default `ks-server`) and `mode=ai-enabled` (`ks-connector`).
 
 # ----------------------------------------------------------
-# Stage 1: cargo-chef planner (runs on build host)
+# Stage 1: cargo-chef planner — computes a stable recipe hash of the
+# workspace's dependency graph, which stage 2 uses to cache-cook deps
+# independently of the source files.
 # ----------------------------------------------------------
-FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS chef
+FROM rust:1.88-bookworm AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
@@ -21,40 +28,60 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ----------------------------------------------------------
-# Stage 2: Builder (native per target arch via QEMU)
+# Stage 2: Builder — native per target arch. docker-multiarch.yml runs
+# this on ubuntu-latest (amd64) and ubuntu-24.04-arm (arm64) so both
+# arches build natively with no QEMU.
 # ----------------------------------------------------------
-FROM rust:1.88-bookworm AS builder
-
+FROM chef AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo install cargo-chef --locked
-
-WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
-
-# Pre-cache dependencies
 RUN cargo chef cook --release --recipe-path recipe.json \
     --features server,connector --no-default-features -p ks-ui
 
-# Build actual binaries
 COPY . .
 RUN cargo build --release \
     --bin ks-server --bin ks-connector \
     --features server,connector --no-default-features -p ks-ui
 
 # ----------------------------------------------------------
-# Stage 3: Distroless — no shell, no pkg manager, ~25MB
+# Stage 3: Runtime helpers — tini + busybox + minimal passwd/group
+# for UID 999 (which the Helm chart hardcodes in securityContext).
+# We pull tini and busybox-static from Debian rather than downloading
+# GitHub releases, so builds stay reproducible against an APT snapshot.
+# ----------------------------------------------------------
+FROM debian:bookworm-slim AS layout
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini busybox-static \
+    && rm -rf /var/lib/apt/lists/*
+
+# Everything the distroless final stage needs is staged under /rootfs so
+# a single COPY --from=layout / / lands it in the right places.
+RUN mkdir -p /rootfs/usr/local/bin /rootfs/etc /rootfs/tmp \
+    && cp /usr/bin/tini /rootfs/usr/local/bin/tini \
+    && cp /bin/busybox /rootfs/usr/local/bin/busybox \
+    && ln -s busybox /rootfs/usr/local/bin/sh \
+    && ln -s busybox /rootfs/usr/local/bin/ls \
+    && ln -s busybox /rootfs/usr/local/bin/test \
+    && echo 'kubestudio:x:999:999::/tmp:/usr/local/bin/false' > /rootfs/etc/passwd \
+    && echo 'kubestudio:x:999:' > /rootfs/etc/group
+
+# ----------------------------------------------------------
+# Stage 4: Distroless runtime — ~25 MB base with glibc + libssl + CA certs.
+# No apt, no package manager, no libraries beyond what we pull in.
 # ----------------------------------------------------------
 FROM gcr.io/distroless/cc-debian12
 
-COPY --from=builder /app/target/release/ks-server /usr/local/bin/ks-server
-COPY --from=builder /app/target/release/ks-connector /usr/local/bin/ks-connector
+COPY --from=layout /rootfs/ /
+COPY --from=builder /app/target/release/ks-server     /usr/local/bin/ks-server
+COPY --from=builder /app/target/release/ks-connector  /usr/local/bin/ks-connector
 
-USER 999:999
-
+# /usr/local/bin/ is early on distroless's PATH — no need to override.
+USER 999
 ENV PORT=8080
 EXPOSE 8080
 
-ENTRYPOINT ["ks-server"]
+ENTRYPOINT ["tini", "--"]
+CMD ["ks-server"]
