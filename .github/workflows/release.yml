@@ -25,37 +25,9 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  docker:
-    name: Docker Image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  # Container image publishing lives in docker-multiarch.yml (native multi-arch,
+  # same `v*` tag trigger). Keeping it there avoids two workflows racing to
+  # overwrite the same tag with different manifests.
 
   build:
     name: Desktop (${{ matrix.name }})
@@ -351,7 +323,7 @@ jobs:
 
   release:
     name: Release
-    needs: [build, build-connector, docker]
+    needs: [build, build-connector]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
