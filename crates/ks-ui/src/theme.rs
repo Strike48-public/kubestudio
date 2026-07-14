@@ -367,20 +367,16 @@ pub fn theme_css() -> &'static str {
     "#
 }
 
-/// Small JS snippet that runs once on page load to apply the saved
-/// theme (or the OS default) before the first paint.
-pub fn theme_init_script() -> &'static str {
+/// JS expression that resolves the effective theme (defaulting to dark),
+/// applies the corresponding `data-theme` attribute, and returns `true`
+/// when dark is active. Executed via `document::eval` on mount so the
+/// initial signal and DOM stay aligned; ignores OS `prefers-color-scheme`
+/// because Strike48 is dark-first by design.
+pub fn theme_init_eval() -> &'static str {
     r#"
-    (function() {
-        var stored = localStorage.getItem('theme');
-        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        var useDark = stored ? stored === 'dark' : prefersDark;
-
-        if (useDark) {
-            document.documentElement.setAttribute('data-theme', 'strike48');
-        } else {
-            document.documentElement.setAttribute('data-theme', 'strike48-light');
-        }
-    })();
+    var stored = localStorage.getItem('theme');
+    var useDark = stored ? stored === 'dark' : true;
+    document.documentElement.setAttribute('data-theme', useDark ? 'strike48' : 'strike48-light');
+    return useDark;
     "#
 }

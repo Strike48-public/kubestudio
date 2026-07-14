@@ -163,16 +163,15 @@ pub fn App() -> Element {
     // Keybindings modal state
     let mut keybindings_modal_open = use_signal(|| false);
 
-    // Theme state — data-theme attribute toggle (Strike48 design system)
+    // Theme state — data-theme attribute toggle (Strike48 design system).
+    // Default to dark; the mount effect below applies the stored preference
+    // (or dark) to the DOM and syncs the signal in a single step so the
+    // toggle button never disagrees with the visible theme.
     let mut is_dark = use_signal(|| true);
 
-    // Sync is_dark with the actual DOM state on mount
     use_effect(move || {
         spawn(async move {
-            if let Ok(val) = document::eval(
-                "return document.documentElement.getAttribute('data-theme') === 'strike48'",
-            )
-            .await
+            if let Ok(val) = document::eval(crate::theme::theme_init_eval()).await
                 && let Some(dark) = val.as_bool()
             {
                 is_dark.set(dark);
@@ -1686,7 +1685,6 @@ pub fn App() -> Element {
     // NOTE: This section is too large to include inline in the module documentation
     // but cannot be extracted due to signal capture requirements
     rsx! {
-        script { dangerous_inner_html: crate::theme::theme_init_script() }
         style { {crate::theme::theme_css()} }
         style { {include_str!("../styles/main.css")} }
         // Handle horizontal scrolling with arrow keys (vertical works naturally)
