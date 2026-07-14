@@ -28,8 +28,10 @@ below that no longer reproduce.
 | RUSTSEC-2026-0097 (`rand` 0.7 — remaining) | `rand` | **Upstream-blocked** (wry kuchikiki fork) |
 | RUSTSEC-2024-0436 | `paste` | **Upstream-blocked** (dioxus-desktop pulls `image` with default features → ravif → rav1e → paste) |
 | RUSTSEC-2025-0134 | `rustls-pemfile` | **Upstream-blocked** (Strike48 SDK still uses tonic 0.12) |
+| RUSTSEC-2026-0194 | `quick-xml` 0.39 (DoS) | **Upstream-blocked** (wayland-scanner pins ^0.39; build-time parser, not reachable) |
+| RUSTSEC-2026-0195 | `quick-xml` 0.39 (DoS) | **Upstream-blocked** (same chain as above) |
 
-7 advisories cleared by version bumps. 12 remain, all upstream-blocked
+7 advisories cleared by version bumps. 14 remain, all upstream-blocked
 on concrete external work tracked below.
 
 ## GTK3 binding chain (RUSTSEC-2024-0411..0420 less 0417, plus 0370, 0429)
@@ -88,6 +90,37 @@ features from this side without a `[patch.crates-io]` fork of
 The transitive `libfuzzer-sys 0.4.12` license (NCSA) is added to the
 allow-list in `deny.toml` — OSI-approved permissive license,
 comparable to MIT/BSD.
+
+## quick-xml 0.39 (RUSTSEC-2026-0194, RUSTSEC-2026-0195)
+
+Both advisories describe DoS vectors reachable when `NsReader` parses
+untrusted XML (quadratic runtime on duplicate-attribute check;
+unbounded namespace-declaration allocation). Fixed in `quick-xml >=0.41`.
+
+**Path:** `dioxus-desktop 0.7.9` → `rfd 0.17.2` → `wayland-client 0.31.14`
+→ `wayland-scanner 0.31.10` → `quick-xml 0.39.4`. Linux desktop targets
+only.
+
+**Why accepted:** `wayland-scanner 0.31.10` (the latest published
+version) pins `quick-xml = "^0.39"`. Cargo therefore refuses to select
+0.41 anywhere in the tree. More importantly, `wayland-scanner` uses
+`quick-xml` **at build time only** — to parse the bundled Wayland
+protocol XML files shipped inside the `wayland-client` crate. The
+advisories' threat model (attacker-controlled XML passed to an
+`NsReader` at runtime) is not reached; the parsed input is a set of
+fixed, trusted files that don't cross a trust boundary.
+
+**Removal trigger (any one of):**
+
+- `wayland-scanner` (or a maintained fork) bumps `quick-xml` to
+  `>=0.41`, or
+- `rfd` swaps its Linux backend off `wayland-client`, or
+- We replace `rfd` as the file-dialog crate.
+
+**Upstream status to watch:**
+
+- wayland-rs repo: <https://github.com/Smithay/wayland-rs>
+- quick-xml migration notes: <https://github.com/tafia/quick-xml/blob/master/Changelog.md>
 
 ## rustls-pemfile (RUSTSEC-2025-0134)
 

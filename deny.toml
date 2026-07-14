@@ -79,6 +79,30 @@ ignore = [
     # the [graph] targets list above ensures local `cargo deny` checks
     # this the same way CI does.
     "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained — tonic 0.12)
+
+    # ---------------------------------------------------------------------
+    # quick-xml 0.39 — transitive via wayland-scanner 0.31.10 →
+    # wayland-client 0.31.14 → rfd 0.17.2 (file-dialog backend used by
+    # dioxus-desktop). wayland-scanner pins `quick-xml = "^0.39"`, and
+    # 0.31.10 is the latest published version — no compatible upgrade
+    # path exists until wayland-scanner relaxes that bound.
+    #
+    # Both advisories describe DoS vectors triggered when NsReader
+    # parses untrusted XML. wayland-scanner uses quick-xml at BUILD
+    # TIME only, to parse Wayland protocol XML files bundled in the
+    # wayland-client crate — never runtime, never attacker-controlled
+    # input. The reachable exposure is zero for this codebase.
+    #
+    # Linux desktop targets only; macOS/Windows do not pull the
+    # wayland chain.
+    #
+    # Removal trigger (any one of):
+    #   - wayland-scanner (or a fork) bumps quick-xml to >=0.41, or
+    #   - rfd swaps its Linux backend off wayland-client, or
+    #   - we replace rfd as the file-dialog crate.
+    # Upstream: https://github.com/Smithay/wayland-rs (quick-xml bump)
+    "RUSTSEC-2026-0194", # quick-xml (quadratic runtime — DoS)
+    "RUSTSEC-2026-0195", # quick-xml (unbounded namespace alloc — DoS)
 ]
 
 [licenses]
