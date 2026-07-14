@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
-repository = "https://github.com/strike48/kubestudio"
+repository = "https://github.com/strike48-public/kubestudio"
 
 [workspace.dependencies]
 # Async runtime

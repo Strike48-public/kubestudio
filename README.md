@@ -105,7 +105,7 @@ Pre-built images are published to GHCR on every release:
 docker run -p 8080:8080 \
   -v ~/.kube/config:/etc/kubestudio/kubeconfigs/default:ro \
   -e KUBECONFIG=/etc/kubestudio/kubeconfigs/default \
-  ghcr.io/strike48/kubestudio:latest
+  ghcr.io/strike48-public/kubestudio:latest
 ```
 
 Or build locally:
