@@ -25,4 +25,10 @@ ignore = [
 
     # Strike48 SDK still uses tonic 0.12 → rustls-pemfile (Linux target only)
     "RUSTSEC-2025-0134", # rustls-pemfile (unmaintained)
+
+    # wayland-scanner 0.31 pins quick-xml ^0.39 — build-time XML parser
+    # for bundled Wayland protocol files, not runtime user input. Linux
+    # desktop only; drops when wayland-scanner bumps quick-xml >=0.41.
+    "RUSTSEC-2026-0194", # quick-xml (quadratic runtime — DoS)
+    "RUSTSEC-2026-0195", # quick-xml (unbounded namespace alloc — DoS)
 ]
