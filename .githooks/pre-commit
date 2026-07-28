@@ -35,4 +35,34 @@ else
     echo "  WARNING: cargo-deny/cargo-audit not installed, skipping. Install with: cargo install cargo-deny"
 fi
 
+# 6. PII scan - block commits that introduce customer/tenant names.
+# Scans only the added lines in staged changes. The scanner itself and its
+# workflow are excluded because they legitimately reference the banned names
+# as pattern definitions.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCANNER="$REPO_ROOT/scripts/check-pii.sh"
+
+if [[ ! -x "$SCANNER" ]]; then
+    echo "  WARNING: $SCANNER not found or not executable, skipping PII check" >&2
+else
+    echo "  Checking for customer names (PII)..."
+    added_lines="$(
+        git diff --cached -- . \
+            ':!scripts/check-pii.sh' \
+            ':!.github/workflows/pii-check.yml' \
+            ':!.githooks/pre-commit' \
+            ':!.githooks/commit-msg' \
+        | grep -E '^\+[^+]' || true
+    )"
+
+    if [[ -n "$added_lines" ]]; then
+        if ! printf '%s\n' "$added_lines" | "$SCANNER" >&2; then
+            echo "" >&2
+            echo "Commit blocked: customer names (PII) found in staged changes." >&2
+            echo "Remove the customer names above and retry, or bypass with --no-verify (not recommended)." >&2
+            exit 1
+        fi
+    fi
+fi
+
 echo "All pre-commit checks passed!"
