@@ -1175,9 +1175,7 @@ impl StudioKubeConnector {
 
 /// Get the current permission mode from environment
 fn get_permission_mode() -> PermissionMode {
-    std::env::var("KUBESTUDIO_MODE")
-        .map(|s| PermissionMode::from_str(&s))
-        .unwrap_or_default()
+    PermissionMode::from_env()
 }
 
 /// Helper to get a Toolbox instance for the given context
