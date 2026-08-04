@@ -282,11 +282,7 @@ pub fn App() -> Element {
 
     // Permission mode (read from KUBESTUDIO_MODE env var)
     // ReadOnly = disables write operations (shell, delete, scale, etc.)
-    let permission_mode = use_signal(|| {
-        std::env::var("KUBESTUDIO_MODE")
-            .map(|s| PermissionMode::from_str(&s))
-            .unwrap_or_default()
-    });
+    let permission_mode = use_signal(PermissionMode::from_env);
     let is_read_only = move || permission_mode() == PermissionMode::ReadOnly;
 
     // Search state

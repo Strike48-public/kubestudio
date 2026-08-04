@@ -87,7 +87,7 @@ cargo run --features connector --no-default-features --bin ks-connector
 | Variable | Description |
 |----------|-------------|
 | `KUBESTUDIO_AI` | Enable AI chat panel (`true` / `false`) |
-| `KUBESTUDIO_MODE` | Permission mode: `read` (view-only) or `write` (full access) |
+| `KUBESTUDIO_MODE` | Permission mode: `read` (view-only) or `write` (full access). Defaults to `read` if unset or unrecognized |
 | `STRIKE48_URL` | Strike48 Prospector Studio gRPC endpoint |
 | `STRIKE48_API_URL` | Strike48 Prospector Studio API base URL |
 | `TENANT_ID` | Tenant identifier |

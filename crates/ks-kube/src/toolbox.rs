@@ -10,6 +10,18 @@
 //! The toolbox supports two permission modes:
 //! - `ReadOnly`: Uses the `view` ClusterRole, only allows read commands
 //! - `ReadWrite`: Uses the `cluster-admin` ClusterRole, allows all commands
+//!
+//! The RBAC binding is the real enforcement boundary: in `ReadOnly` mode the
+//! toolbox pod's ServiceAccount is bound to Kubernetes' built-in `view`
+//! ClusterRole (which also excludes `secrets`), so the API server itself
+//! rejects writes even if a command slips past [`is_write_command`].
+//! `is_write_command`'s blacklist exists to reject obviously-disallowed
+//! commands early (before spending an exec round-trip) and to surface a
+//! clearer error — it is defense-in-depth on top of RBAC, not the boundary
+//! itself, and it is not expected to catch every possible bypass.
+//!
+//! Defaults to `ReadOnly` when `KUBESTUDIO_MODE` is unset or unrecognized —
+//! see [`PermissionMode::from_env`].
 
 use k8s_openapi::api::core::v1::{Container, Namespace, Pod, PodSpec, ServiceAccount};
 use k8s_openapi::api::rbac::v1::{ClusterRoleBinding, RoleRef, Subject};
@@ -38,16 +50,23 @@ pub const TOOLBOX_IMAGE: &str = "bitnami/kubectl:latest";
 pub enum PermissionMode {
     /// Read-only access - uses `view` ClusterRole
     /// Only allows read commands (get, list, describe, logs)
+    ///
+    /// This is the fail-closed default: an unset or unrecognized
+    /// `KUBESTUDIO_MODE` must never silently grant write access.
+    #[default]
     ReadOnly,
 
     /// Read-write access - uses `cluster-admin` ClusterRole
     /// Allows all commands including create, apply, delete
-    #[default]
     ReadWrite,
 }
 
 impl PermissionMode {
-    /// Parse from string (e.g., from environment variable)
+    /// Parse from string (e.g., from environment variable).
+    ///
+    /// Unrecognized values fall back to `ReadOnly` (fail-closed) and log a
+    /// warning, so a typo in `KUBESTUDIO_MODE` can never silently grant
+    /// write/cluster-admin access.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -55,7 +74,26 @@ impl PermissionMode {
             "write" | "readwrite" | "read-write" | "admin" | "cluster-admin" => {
                 PermissionMode::ReadWrite
             }
-            _ => PermissionMode::ReadWrite, // Default to read-write
+            other => {
+                tracing::warn!(
+                    "Unrecognized KUBESTUDIO_MODE value '{}', defaulting to read-only",
+                    other
+                );
+                PermissionMode::ReadOnly
+            }
+        }
+    }
+
+    /// Read the permission mode from the `KUBESTUDIO_MODE` environment
+    /// variable, defaulting to `ReadOnly` when unset or unrecognized.
+    ///
+    /// This is the single source of truth for reading `KUBESTUDIO_MODE` —
+    /// callers should use this instead of reading the env var directly, so
+    /// the fail-closed default can't drift out of sync between call sites.
+    pub fn from_env() -> Self {
+        match std::env::var("KUBESTUDIO_MODE") {
+            Ok(s) => Self::from_str(&s),
+            Err(_) => Self::default(),
         }
     }
 
@@ -67,7 +105,12 @@ impl PermissionMode {
         }
     }
 
-    /// Check if a command is allowed in this permission mode
+    /// Check if a command is allowed in this permission mode.
+    ///
+    /// This is an early-rejection UX layer, not the security boundary — see
+    /// the module-level docs. The RBAC ClusterRoleBinding created when the
+    /// toolbox's service account is provisioned is what the API server
+    /// actually enforces.
     pub fn is_command_allowed(&self, command: &str) -> bool {
         match self {
             PermissionMode::ReadWrite => true,
@@ -76,7 +119,11 @@ impl PermissionMode {
     }
 }
 
-/// Check if a command is a write operation
+/// Best-effort check for whether a command looks like a write operation.
+///
+/// This is a UX/defense-in-depth layer on top of RBAC (see module docs), not
+/// the enforcement boundary — it is not expected to catch every possible
+/// bypass (e.g. unusual whitespace, shell tricks, or raw API calls).
 fn is_write_command(command: &str) -> bool {
     // Normalize the command for checking
     let cmd_lower = command.to_lowercase();
@@ -574,12 +621,9 @@ impl Toolbox {
     pub async fn exec(&self, command: &str) -> SkdResult<ExecResult> {
         // Check if command is allowed in current permission mode
         if !self.permission_mode.is_command_allowed(command) {
-            return Err(SkdError::KubeApi {
-                status_code: 403,
-                message: format!(
-                    "Command not allowed in read-only mode. Blocked write operation: {}",
-                    command.chars().take(50).collect::<String>()
-                ),
+            return Err(SkdError::PermissionDenied {
+                mode: format!("{:?}", self.permission_mode),
+                command: command.chars().take(50).collect::<String>(),
             });
         }
 
@@ -826,10 +870,20 @@ mod tests {
         assert_eq!(PermissionMode::from_str("view"), PermissionMode::ReadOnly);
         assert_eq!(PermissionMode::from_str("write"), PermissionMode::ReadWrite);
         assert_eq!(PermissionMode::from_str("admin"), PermissionMode::ReadWrite);
+        // Unrecognized values must fail closed to read-only, never silently
+        // grant write/cluster-admin access.
         assert_eq!(
             PermissionMode::from_str("unknown"),
-            PermissionMode::ReadWrite
+            PermissionMode::ReadOnly
         );
+        assert_eq!(PermissionMode::from_str(""), PermissionMode::ReadOnly);
+    }
+
+    #[test]
+    fn test_permission_mode_default_is_read_only() {
+        // The Default impl backs both `Toolbox::new()` and the fallback in
+        // `from_env()` when KUBESTUDIO_MODE is unset — it must fail closed.
+        assert_eq!(PermissionMode::default(), PermissionMode::ReadOnly);
     }
 
     #[test]
