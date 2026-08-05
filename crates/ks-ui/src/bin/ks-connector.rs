@@ -281,6 +281,74 @@ document.addEventListener('keydown', function(e) {
 }, true);
 </script>"#;
 
+/// In-memory polyfill for `sessionStorage` and `localStorage`.
+///
+/// Matrix's app iframe is served with a CSP `sandbox` directive that omits
+/// `allow-same-origin` (see
+/// `matrix_studio/lib/matrix_studio/controllers/app_controller/security.ex:96-100`),
+/// which gives the document an opaque origin. In that state, any access to
+/// `window.sessionStorage` or `window.localStorage` throws `SecurityError`
+/// synchronously — even a defensive `if (window.sessionStorage)` check
+/// throws on the property read.
+///
+/// KubeStudio's own code has been wrapped in try/catch, but `dioxus-liveview`
+/// itself uses `sessionStorage` unconditionally in its history/router
+/// (`dioxus-liveview-0.7.9/src/history.rs:179, 193, 219, 242, 271`) — every
+/// route push, replace, or init throws an uncaught `SecurityError` in the
+/// browser console. Since we can't patch the framework directly from here,
+/// we shadow both storage properties on `window` with an in-memory
+/// implementation BEFORE any Dioxus code runs. When native storage works,
+/// it is untouched; when native storage throws, the fallback preserves
+/// framework code paths (they get / set, they just don't survive a page
+/// reload — which is fine, the iframe is reload-hostile anyway because a
+/// reload drops the parent SPA's session token from the URL).
+///
+/// Injected into `<head>` before the Dioxus WASM bootstrap, so the shadow
+/// is in place before any framework code touches the property.
+const STORAGE_POLYFILL_SCRIPT: &str = r#"<script>
+(function() {
+  function testStorage(name) {
+    try {
+      var s = window[name];
+      s.setItem('__strike48_probe__', '1');
+      s.removeItem('__strike48_probe__');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function makeMemoryStorage() {
+    var data = {};
+    return {
+      getItem: function(k) {
+        return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null;
+      },
+      setItem: function(k, v) { data[k] = String(v); },
+      removeItem: function(k) { delete data[k]; },
+      clear: function() { data = {}; },
+      key: function(i) { return Object.keys(data)[i] || null; },
+      get length() { return Object.keys(data).length; }
+    };
+  }
+
+  ['sessionStorage', 'localStorage'].forEach(function(name) {
+    if (!testStorage(name)) {
+      try {
+        Object.defineProperty(window, name, {
+          value: makeMemoryStorage(),
+          configurable: true,
+          writable: false
+        });
+        console.log('[Strike48] Storage blocked, installing polyfills via defineProperty');
+      } catch (e) {
+        console.warn('[Strike48] Could not install ' + name + ' polyfill:', e.message);
+      }
+    }
+  });
+})();
+</script>"#;
+
 fn rewrite_dioxus_websocket_url(html: &str) -> String {
     let phoenix_shim = r#"<script>
 // Matrix Phoenix Socket Shim for Dioxus LiveView
@@ -507,8 +575,18 @@ fn rewrite_dioxus_websocket_url(html: &str) -> String {
 
         // Matrix Studio's TokenInjector handles injecting
         // window.__MATRIX_SESSION_TOKEN__ into the HTML before it reaches the
-        // browser, so we only inject the Phoenix WebSocket shim here.
-        let injected = format!("{}{}", phoenix_shim, TAB_INTERCEPT_SCRIPT);
+        // browser, so we only inject the storage polyfill + Phoenix WebSocket
+        // shim here.
+        //
+        // Order matters: STORAGE_POLYFILL_SCRIPT must run FIRST so that when
+        // dioxus-liveview's history code (which uses sessionStorage
+        // unconditionally, see `dioxus-liveview/src/history.rs`) executes,
+        // the shadow property is already in place. See the STORAGE_POLYFILL_SCRIPT
+        // moduledoc for why.
+        let injected = format!(
+            "{}{}{}",
+            STORAGE_POLYFILL_SCRIPT, phoenix_shim, TAB_INTERCEPT_SCRIPT
+        );
 
         if let Some(head_end) = result.find("</head>") {
             result.insert_str(head_end, &injected);
