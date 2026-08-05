@@ -1798,6 +1798,22 @@ fn render_markdown(input: &str) -> String {
 /// JS snippet that loads mermaid + echarts CDN scripts and defines
 /// `window.__processChatCharts()` to post-process code blocks.
 /// Injected once on first load.
+///
+/// Mermaid and ECharts are loaded from `cdn.jsdelivr.net`. In Matrix's
+/// sandboxed iframe the CSP `script-src` allowlist does not include jsdelivr
+/// (`matrix_studio/lib/matrix_studio/controllers/app_controller/security.ex`);
+/// the browser blocks the script load and fires `onerror` on the element
+/// (this also emits a CSP violation report to the console, which is expected
+/// and informative — we surface it as a single warning line instead of an
+/// uncaught error). When either lib fails to load, the corresponding
+/// rendering branch in `__processChatCharts` short-circuits on the
+/// `window.mermaid` / `window.echarts` presence check, so the chat still
+/// renders — chart code blocks just display as plain code.
+///
+/// To restore chart rendering inside the sandbox, either bundle the two
+/// libraries in the connector binary and serve them from the connector's
+/// own asset route, or ask Matrix to add `cdn.jsdelivr.net` to
+/// `script-src` (weakens the sandbox — coordinate before doing so).
 const CHART_PROCESSOR_JS: &str = r#"
 (function() {
     if (window.__chatChartsInit) return;
@@ -1811,6 +1827,9 @@ const CHART_PROCESSOR_JS: &str = r#"
             window.mermaid.initialize({ startOnLoad: false, theme: 'dark' });
             console.log('[KubeStudio] Mermaid loaded');
         };
+        ms.onerror = function() {
+            console.warn('[KubeStudio] Mermaid failed to load (CSP script-src blocks cdn.jsdelivr.net in the sandbox iframe); mermaid code blocks will render as plain text');
+        };
         document.head.appendChild(ms);
     }
 
@@ -1819,6 +1838,9 @@ const CHART_PROCESSOR_JS: &str = r#"
         var es = document.createElement('script');
         es.src = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';
         es.onload = function() { console.log('[KubeStudio] ECharts loaded'); };
+        es.onerror = function() {
+            console.warn('[KubeStudio] ECharts failed to load (CSP script-src blocks cdn.jsdelivr.net in the sandbox iframe); echarts code blocks will render as plain text');
+        };
         document.head.appendChild(es);
     }
 

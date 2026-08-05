@@ -179,18 +179,25 @@ pub fn App() -> Element {
         });
     });
 
-    // Toggle theme closure
+    // Toggle theme closure.
+    //
+    // The `localStorage.setItem` calls are wrapped in try/catch: see
+    // `crate::theme::theme_init_eval` for the full reasoning. In Matrix's
+    // opaque-origin sandbox iframe every setItem previously threw
+    // `SecurityError` uncaught on every toggle. With the guard the DOM
+    // still updates (which is what makes the toggle visible to the user);
+    // only persistence across reloads is lost, and only in that context.
     let mut toggle_theme = move |_: ()| {
         let new_dark = !*is_dark.peek();
         is_dark.set(new_dark);
         spawn(async move {
             if new_dark {
                 let _ = document::eval(
-                    "document.documentElement.setAttribute('data-theme', 'strike48'); localStorage.setItem('theme','dark');"
+                    "document.documentElement.setAttribute('data-theme', 'strike48'); try { localStorage.setItem('theme','dark'); } catch (e) { /* opaque-origin iframe */ }"
                 ).await;
             } else {
                 let _ = document::eval(
-                    "document.documentElement.setAttribute('data-theme', 'strike48-light'); localStorage.setItem('theme','light');"
+                    "document.documentElement.setAttribute('data-theme', 'strike48-light'); try { localStorage.setItem('theme','light'); } catch (e) { /* opaque-origin iframe */ }"
                 ).await;
             }
         });
