@@ -231,6 +231,11 @@ impl UpdateAgentInput {
 
 /// Abstraction over the chat backend. Implement this trait to swap Matrix
 /// for another provider without touching the UI layer.
+// rust 1.99's `clippy::double_must_use` fires on the code `#[async_trait]`
+// generates for this trait (it adds `#[must_use]` to methods that already
+// return `anyhow::Result`, which is itself `must_use`) — the attribute is
+// macro-generated, so allow the lint at the trait level.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ChatClient: Send + Sync {
     async fn list_agents(&self) -> anyhow::Result<Vec<AgentInfo>>;

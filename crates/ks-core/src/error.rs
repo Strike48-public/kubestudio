@@ -18,6 +18,9 @@ pub enum SkdError {
     #[error("Kubernetes API error: {status_code} - {message}")]
     KubeApi { status_code: u16, message: String },
 
+    #[error("Command not permitted in {mode} mode: {command}")]
+    PermissionDenied { mode: String, command: String },
+
     #[error("Kubeconfig error: {0}")]
     Kubeconfig(String),
 

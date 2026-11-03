@@ -101,6 +101,14 @@ ignore = [
     #   - rfd swaps its Linux backend off wayland-client, or
     #   - we replace rfd as the file-dialog crate.
     # Upstream: https://github.com/Smithay/wayland-rs (quick-xml bump)
+    # ---------------------------------------------------------------------
+    # unsafe-libyaml 0.2 — transitive via serde_yaml (used by kube-client /
+    # strike48 SDK config parsing). serde_yaml itself is unmaintained and
+    # unsafe-libyaml is its only native binding; no maintained alternative
+    # exists in the current dep tree. No vulnerability, unmaintained only.
+    # Removal trigger: strike48 SDK / kube-client move off serde_yaml.
+    "RUSTSEC-2024-0449", # unsafe-libyaml (unmaintained — transitive via serde_yaml; no maintained alternative in the dep tree)
+
     "RUSTSEC-2026-0194", # quick-xml (quadratic runtime — DoS)
     "RUSTSEC-2026-0195", # quick-xml (unbounded namespace alloc — DoS)
 ]

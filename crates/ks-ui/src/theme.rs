@@ -17,9 +17,23 @@ pub fn theme_css() -> &'static str {
     r#"
         /* ============================================
            STRIKE48 DESIGN SYSTEM TOKENS
-           ============================================ */
+           ============================================
 
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+           NOTE: the previous `@import url('https://fonts.googleapis.com/...')`
+           was removed. This UI is served inside Matrix's sandboxed iframe,
+           whose CSP (matrix_studio/lib/matrix_studio/controllers/app_controller/
+           security.ex) sets `font-src {origin} data:` with the explicit comment
+           "no https: - prevents token exfiltration" and `style-src` without any
+           external allowlist for Google Fonts. The remote import always failed
+           there and showed as a red CSP violation in the console on every
+           mount. The font-family stacks below still list `'IBM Plex Sans'` /
+           `'IBM Plex Mono'` first, so a locally-installed Plex (dev machines
+           often have it) or a future bundled `@font-face` still wins; the
+           system-font fallback keeps Strike48 legible otherwise.
+
+           To restore Plex specifically inside the sandbox, embed the WOFF2
+           files as base64 `@font-face` declarations here. Ship them in the
+           binary rather than fetching remotely so the CSP posture holds. */
 
         :root,
         [data-theme="strike48"] {
@@ -372,9 +386,19 @@ pub fn theme_css() -> &'static str {
 /// when dark is active. Executed via `document::eval` on mount so the
 /// initial signal and DOM stay aligned; ignores OS `prefers-color-scheme`
 /// because Strike48 is dark-first by design.
+///
+/// The `localStorage` read is wrapped in try/catch: inside Matrix's
+/// sandboxed iframe the document has an opaque origin (CSP `sandbox`
+/// directive omits `allow-same-origin` — see matrix_studio's
+/// `security.ex:96-100`), and any storage-API read throws `SecurityError`
+/// uncaught, which produced the red `Failed to read the 'localStorage'
+/// property from 'Window'` error on every mount. Falling back to `null`
+/// preserves the dark-first default; persistence gracefully degrades to
+/// session-only in that context.
 pub fn theme_init_eval() -> &'static str {
     r#"
-    var stored = localStorage.getItem('theme');
+    var stored = null;
+    try { stored = localStorage.getItem('theme'); } catch (e) { /* opaque-origin iframe */ }
     var useDark = stored ? stored === 'dark' : true;
     document.documentElement.setAttribute('data-theme', useDark ? 'strike48' : 'strike48-light');
     return useDark;
