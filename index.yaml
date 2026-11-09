@@ -3,7 +3,7 @@ entries:
   kubestudio:
   - apiVersion: v2
     appVersion: 9.9.9
-    created: "2026-10-13T20:55:08.196460419Z"
+    created: "2026-11-09T21:35:51.819435714Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 1df12669b087bc4176dfc9a9e65b051c70fb08ca57c9f0fc3b8fca34caa1f0c3
     home: https://github.com/Strike48/kubestudio
@@ -22,7 +22,7 @@ entries:
     version: 9.9.9
   - apiVersion: v2
     appVersion: 0.2.1
-    created: "2026-10-13T20:55:08.196150425Z"
+    created: "2026-11-09T21:35:51.819030418Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 30b79cf67273b63870af93c356b273347cfa79609bd1176ab382366b9ff6debe
     home: https://github.com/Strike48/kubestudio
@@ -41,9 +41,9 @@ entries:
     version: 0.2.1
   - apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-10-13T20:55:08.19579854Z"
+    created: "2026-11-09T21:35:51.818576515Z"
     description: A modern Kubernetes dashboard deployed in-cluster
-    digest: 62fe27646dcabea3b7b3b6b23fb9f7f6d79b7ee87e317db95b1f599831f16172
+    digest: 541cd4106724bc116d584f8f6afad109a36eb2eb7c2b72a68aee785b6607a45f
     home: https://github.com/Strike48/kubestudio
     keywords:
     - kubernetes
@@ -60,7 +60,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.5
-    created: "2026-10-13T20:55:08.195436344Z"
+    created: "2026-11-09T21:35:51.818042659Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 23021c8e0364be065709071ce4ab0038041e3143bb48356ce9737a60cc07ca58
     home: https://github.com/Strike48/kubestudio
@@ -79,7 +79,7 @@ entries:
     version: 0.1.5
   - apiVersion: v2
     appVersion: 0.1.4
-    created: "2026-10-13T20:55:08.195063998Z"
+    created: "2026-11-09T21:35:51.817584219Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 13038255bec7aefcb71af6b29ee947cc3f7b9d054ed5d5baa36aaf9b25748ff2
     home: https://github.com/Strike48/kubestudio
@@ -98,7 +98,7 @@ entries:
     version: 0.1.4
   - apiVersion: v2
     appVersion: 0.1.3
-    created: "2026-10-13T20:55:08.194722589Z"
+    created: "2026-11-09T21:35:51.817158204Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 162bd1c3df9653383f62ec8ff41ec318b80af3eab46961dbab479bcfbe0cb1c2
     home: https://github.com/Strike48/kubestudio
@@ -117,7 +117,7 @@ entries:
     version: 0.1.3
   - apiVersion: v2
     appVersion: 0.1.2
-    created: "2026-10-13T20:55:08.194340789Z"
+    created: "2026-11-09T21:35:51.816684127Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 9655d81a17db41565bf2d95b9c64ee62f8fb3871c8e559b45c7b91ae7aea62ba
     home: https://github.com/Strike48/kubestudio
@@ -136,7 +136,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: 0.1.1-rc1
-    created: "2026-10-13T20:55:08.19394701Z"
+    created: "2026-11-09T21:35:51.816157718Z"
     description: A modern Kubernetes dashboard deployed in-cluster
     digest: 875e2329a4f2f991a805075c6c1077a9d01ba4f7bfa5fbc6776efb9ea4b19067
     home: https://github.com/Strike48/kubestudio
@@ -153,4 +153,4 @@ entries:
     urls:
     - https://strike48-public.github.io/kubestudio/kubestudio-0.1.1-rc1.tgz
     version: 0.1.1-rc1
-generated: "2026-10-13T20:55:08.193331783Z"
+generated: "2026-11-09T21:35:51.815427837Z"
