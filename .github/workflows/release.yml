@@ -51,6 +51,13 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: kubestudio-windows-x86_64.exe
             name: Windows x86_64
+          # Native ARM Windows runner (GA since 2025): same signing path as
+          # x64 (azure/trusted-signing-action is a composite action, no Docker
+          # needed, so it runs on the ARM runner).
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: kubestudio-windows-arm64.exe
+            name: Windows arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -199,6 +206,12 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: ks-connector-windows-x86_64
             name: Windows x86_64
+          # Windows ARM connector: StrikeHub's arm64 MSI stages this (the
+          # .zip + .sha256 sidecar are produced by the Package step below).
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: ks-connector-windows-arm64
+            name: Windows arm64
 
     steps:
       - uses: actions/checkout@v4
