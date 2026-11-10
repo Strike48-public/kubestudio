@@ -1,0 +1,449 @@
+---
+# Demo Namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-app
+  labels:
+    environment: demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-monitoring
+  labels:
+    environment: demo
+---
+# ConfigMaps
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: demo-app
+data:
+  app.properties: |
+    server.port=8080
+    logging.level=INFO
+  database.url: "postgresql://db:5432/myapp"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: demo-app
+data:
+  nginx.conf: |
+    worker_processes auto;
+    events {
+      worker_connections 1024;
+    }
+    http {
+      server {
+        listen 80;
+        location / {
+          proxy_pass http://backend:8080;
+        }
+      }
+    }
+---
+# Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: demo-app
+type: Opaque
+stringData:
+  username: admin
+  password: demo-placeholder
+  connection-string: "postgresql://admin:demo-placeholder@db:5432/myapp"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-keys
+  namespace: demo-app
+type: Opaque
+stringData:
+  stripe-key: "demo-placeholder"
+  sendgrid-key: "demo-placeholder"
+---
+# Web Application Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: demo-app
+  labels:
+    app: web-app
+    tier: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+        tier: frontend
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        env:
+        - name: ENVIRONMENT
+          value: "demo"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+      - name: config
+        configMap:
+          name: nginx-config
+---
+# Backend API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: demo-app
+  labels:
+    app: backend-api
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend-api
+  template:
+    metadata:
+      labels:
+        app: backend-api
+        tier: backend
+    spec:
+      containers:
+      - name: api
+        image: hashicorp/http-echo:latest
+        args:
+        - "-text=Hello from backend API!"
+        ports:
+        - containerPort: 5678
+          name: http
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: database.url
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: password
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+# Database StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: demo-app
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        tier: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: password
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: username
+        - name: POSTGRES_DB
+          value: myapp
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+# Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app
+  namespace: demo-app
+spec:
+  selector:
+    app: web-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-api
+  namespace: demo-app
+spec:
+  selector:
+    app: backend-api
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 5678
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: demo-app
+spec:
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+  clusterIP: None  # Headless service for StatefulSet
+---
+# Monitoring Stack
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: demo-monitoring
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: demo-monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: admin
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+---
+# CronJob for periodic tasks
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-backup
+  namespace: demo-app
+spec:
+  schedule: "0 2 * * *"  # Run at 2 AM daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: postgres:16-alpine
+            command:
+            - /bin/sh
+            - -c
+            - echo "Running backup at $(date)"
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-job
+  namespace: demo-app
+spec:
+  schedule: "*/15 * * * *"  # Every 15 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleanup
+            image: busybox:latest
+            command:
+            - /bin/sh
+            - -c
+            - echo "Cleaning up old files at $(date)"
+          restartPolicy: OnFailure
+---
+# One-time Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migration
+  namespace: demo-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: migrate
+        image: postgres:16-alpine
+        command:
+        - /bin/sh
+        - -c
+        - echo "Running database migration"; sleep 5; echo "Migration complete"
+      restartPolicy: Never
+  backoffLimit: 3
+---
+# DaemonSet (runs on every node)
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: demo-monitoring
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      containers:
+      - name: node-exporter
+        image: prom/node-exporter:latest
+        ports:
+        - containerPort: 9100
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+---
+# ServiceAccount with RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-service-account
+  namespace: demo-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+  namespace: demo-app
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-role-binding
+  namespace: demo-app
+subjects:
+- kind: ServiceAccount
+  name: app-service-account
+  namespace: demo-app
+roleRef:
+  kind: Role
+  name: app-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-volume
+  namespace: demo-app
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

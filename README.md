@@ -70,7 +70,7 @@ RUST_LOG=info cargo run
 
 ### Connector Mode (Local Dev)
 
-Run as a Matrix connector with AI chat enabled. Requires a [Matrix](https://github.com/Strike48/matrix) backend:
+Run as a Matrix connector with AI chat enabled. Requires a [Matrix](https://github.com/Strike48/matrix) backend. To connect to `studio.strike48.com`, or for a wrapper script and demo data, see [docs/running-connector.md](docs/running-connector.md):
 
 ```bash
 RUST_LOG=info \
