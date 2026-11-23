@@ -29,31 +29,6 @@ targets = [
 version = 2
 ignore = [
     # ---------------------------------------------------------------------
-    # GTK3 binding chain — transitive via dioxus-desktop 0.7 → wry 0.53 →
-    # gtk 0.18 + javascriptcore-rs + webkit2gtk. The entire gtk-rs GTK3
-    # binding family was marked unmaintained on 2024-11-26 in favour of
-    # GTK4 bindings; no security impact called out by the maintainers.
-    # gdkx11 (RUSTSEC-2024-0417) is not reached on the wry 0.53 feature
-    # set, only the low-level gdkx11-sys binding. Linux is the only
-    # target affected; macOS/Windows builds do not pull GTK at all.
-    #
-    # Removal trigger (any one of):
-    #   - dioxus-desktop adopts a GTK4-backed wry, or
-    #   - dioxus-native (Blitz) reaches feature parity for our UI, or
-    #   - we switch desktop renderer entirely.
-    # Upstream: https://github.com/tauri-apps/wry/issues/1474
-    # See docs/dependency-tracking.md for full status.
-    "RUSTSEC-2024-0411", # gdkwayland-sys (unmaintained)
-    "RUSTSEC-2024-0412", # gdk (unmaintained)
-    "RUSTSEC-2024-0413", # atk (unmaintained)
-    "RUSTSEC-2024-0414", # gdkx11-sys (unmaintained)
-    "RUSTSEC-2024-0415", # gtk (unmaintained)
-    "RUSTSEC-2024-0416", # atk-sys (unmaintained)
-    "RUSTSEC-2024-0418", # gdk-sys (unmaintained)
-    "RUSTSEC-2024-0419", # gtk3-macros (unmaintained)
-    "RUSTSEC-2024-0420", # gtk-sys (unmaintained)
-
-    # ---------------------------------------------------------------------
     # proc-macro-error — transitive via glib-macros 0.18 and gtk3-macros,
     # i.e. the same GTK3 chain above. Risk is low: build-time only proc
     # macro, no runtime exposure. Drops out automatically when the GTK3
